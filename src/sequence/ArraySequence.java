@@ -1,5 +1,10 @@
 package sequence;
 
+/**
+ * A {@linkplain Sequence} backed by a character array.
+ * 
+ * @author AzureTriple
+ */
 public class ArraySequence implements Sequence {
     protected char[] data;
     protected int start,end,length;
@@ -93,6 +98,14 @@ public class ArraySequence implements Sequence {
     
     @Override public int length() {return end - start;}
     
+    /**
+     * @param idx The index of the desired character. Negative values indicate an
+     *            offset from the end instead of the start.
+     * 
+     * @return The adjusted index.
+     * 
+     * @throws IndexOutOfBoundsException <code>|idx| &ge; size()</code>
+     */
     protected int idx(final int idx) throws IndexOutOfBoundsException {
         final int out = idx + (idx < 0? end : start);
         if(end <= out || out < start)
@@ -102,24 +115,170 @@ public class ArraySequence implements Sequence {
             );
         return out;
     }
-    @Override
-    public char charAt(int index) {
-        return 0;
-    }
+    @Override public char charAt(final int index) throws IndexOutOfBoundsException {return data[idx(index)];}
     
     @Override
-    public CharSequence subSequence(int start,int end) {
-        return null;
+    public ArraySequence subSequence(int start,int end) throws IllegalArgumentException {
+        if((end = idx(end)) < (start = idx(start)))
+            throw new IllegalArgumentException(
+                "Invalid range: [%d,%d)"
+                .formatted(end,start)
+            );
+        return new ArraySequence(data,start,end,end - start);
     }
     
-    @Override
-    public SequenceIterator iterator() {
-        return null;
+    /**A {@linkplain SequenceIterator} for an {@linkplain ArraySequence}.*/
+    public abstract class ArraySequenceIterator implements SequenceIterator {
+        protected int cursor,mark;
+        
+        protected ArraySequenceIterator(final int begin) {cursor = mark = begin;}
+        
+        protected abstract int increment(int i);
+        protected void increment() {cursor = increment(cursor);}
+        protected abstract int offset(int i);
+        protected boolean oob(final int i) {return end <= i || i < start;}
+        protected abstract boolean hasNext(int i);
+        
+        @Override public long index() {return cursor - start;}
+        @Override public ArraySequence getParent() {return ArraySequence.this;}
+        
+        @Override public Character peek() {return hasNext()? null : data[cursor];}
+        @Override public Character peek(int offset) {return oob(offset = offset(offset))? null : data[offset];}
+        @Override public Character peek(final long offset) {return peek((int)offset);}
+        
+        @Override public boolean hasNext() {return hasNext(cursor);}
+        @Override
+        public Character next() {
+            if(hasNext()) {
+                final char c = data[cursor];
+                increment();
+                return c;
+            }
+            return null;
+        }
+        
+        @Override
+        public Character skipWS() {
+            while(hasNext()) {
+                final char c = data[cursor];
+                if(!Character.isWhitespace(c)) return c;
+                increment();
+            }
+            return null;
+        }
+        @Override
+        public Character peekNextNonWS() {
+            if(hasNext()) {
+                for(int i = cursor;hasNext(i = increment(i));) {
+                    final char c = data[i];
+                    if(!Character.isWhitespace(c)) return c;
+                }
+            }
+            return null;
+        }
+        @Override
+        public Character nextNonWS() {
+            if(hasNext()) {
+                increment();
+                while(hasNext()) {
+                    final char c = data[cursor];
+                    if(!Character.isWhitespace(c)) return c;
+                    increment();
+                }
+            }
+            return null;
+        }
+        
+        @Override public void mark() throws IndexOutOfBoundsException {mark(0);}
+        @Override public void mark(final long offset) throws IndexOutOfBoundsException {mark((int)offset);}
+        
+        @Override
+        public ArraySequenceIterator jumpTo(final int index) throws IndexOutOfBoundsException {
+            cursor = idx(index);
+            return this;
+        }
+        @Override
+        public ArraySequenceIterator jumpTo(final long index) throws IndexOutOfBoundsException {
+            return jumpTo((int)index);
+        }
+        @Override
+        public ArraySequenceIterator jumpOffset(final int offset) throws IndexOutOfBoundsException {
+            if(oob(cursor = offset(offset)))
+                throw new IndexOutOfBoundsException(
+                    "Cannot jump to index %d (range: [%d,%d),input: %d)."
+                    .formatted(cursor,start,end,offset)
+                );
+            return this;
+        }
+        @Override
+        public ArraySequenceIterator jumpOffset(final long offset) throws IndexOutOfBoundsException {
+            return jumpOffset((int)offset);
+        }
+        
+        protected abstract int subBegin();
+        protected abstract int subEnd();
+        @Override
+        public ArraySequence subSequence() throws IndexOutOfBoundsException {
+            final int a = subBegin(),b = subEnd();
+            if(b < a)
+                throw new IndexOutOfBoundsException(
+                    "Range [%d,%d) is invalid."
+                    .formatted(a,b)
+                );
+            return new ArraySequence(data,a,b,b - a);
+        }
+        
+        protected abstract int strBegin();
+        protected abstract int strEnd();
+        @Override public String toString() {return new String(data,strBegin(),strEnd());}
+    }
+    /**Forward Array Sequence Iterator*/
+    protected class FASI extends ArraySequenceIterator {
+        protected FASI() {super(start);}
+        
+        @Override protected int increment(final int i) {return i + 1;}
+        @Override protected int offset(final int i) {return cursor + i;}
+        @Override protected boolean hasNext(final int i) {return i != end;}
+        
+        @Override
+        public void mark(final int offset) throws IndexOutOfBoundsException {
+            if(oob(mark = offset(offset)) && mark != end)
+                throw new IndexOutOfBoundsException(
+                    "Cannot mark index %d (range: [%d,%d),input: %d)."
+                    .formatted(mark,start,end,offset)
+                );
+        }
+        
+        @Override protected int subBegin() {return mark;}
+        @Override protected int subEnd() {return cursor;}
+        
+        @Override protected int strBegin() {return start;}
+        @Override protected int strEnd() {return cursor;}
+    }
+    /**Reverse Array Sequence Iterator.*/
+    protected class RASI extends ArraySequenceIterator {
+        protected RASI() {super(end - 1);}
+        
+        @Override protected int increment(final int i) {return i - 1;}
+        @Override protected int offset(final int i) {return cursor - i;}
+        @Override protected boolean hasNext(final int i) {return i != start - 1;}
+        
+        @Override
+        public void mark(final int offset) throws IndexOutOfBoundsException {
+            if(oob(mark = offset(offset)) && mark != start - 1)
+                throw new IndexOutOfBoundsException(
+                    "Cannot mark index %d (range: [%d,%d),input: %d)."
+                    .formatted(mark + 1,start,end,offset)
+                );
+        }
+        
+        @Override protected int subBegin() {return cursor + 1;}
+        @Override protected int subEnd() {return mark + 1;}
+        
+        @Override protected int strBegin() {return cursor + 1;}
+        @Override protected int strEnd() {return end;}
     }
     
-    @Override
-    public SequenceIterator reverseIterator() {
-        return null;
-    }
-    
+    @Override public ArraySequenceIterator iterator() {return new FASI();}
+    @Override public ArraySequenceIterator reverseIterator() {return new RASI();}
 }

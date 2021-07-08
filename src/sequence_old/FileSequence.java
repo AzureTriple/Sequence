@@ -131,11 +131,16 @@ public class FileSequence extends Sequence implements AutoCloseable {
      * 
      * @throws IndexOutOfBoundsException The indices represent an invalid range or
      *                                   {@linkplain #idx(long)} threw.
-     *                                   
+     * 
      * @see #idx(long)
      */
-    public FileSequence subSequence(final long start,final long end) throws IndexOutOfBoundsException {
-        return internalSS(idx(start),idx(end));
+    public FileSequence subSequence(long start,long end) throws IndexOutOfBoundsException {
+        if((end = idx(end)) < (start = idx(start)))
+            throw new IndexOutOfBoundsException(
+                "Range [%d,%d) is invalid."
+                .formatted(end,start)
+            );
+        return internalSS(start,end);
     }
     /**
      * @throws IndexOutOfBoundsException {@linkplain #idx(long)} threw.
