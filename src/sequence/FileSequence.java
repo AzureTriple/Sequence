@@ -1,34 +1,82 @@
 package sequence;
 
+import java.util.Iterator;
+import java.util.NoSuchElementException;
+
 import java.io.File;
 import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.io.RandomAccessFile;
 import java.io.UncheckedIOException;
 import java.nio.channels.FileChannel.MapMode;
-import java.nio.channels.FileLock;
-import java.nio.channels.OverlappingFileLockException;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.Paths;
+import util.FixedSizeCharset;
 
-public class FileSequence implements Sequence {
+/**
+ * A {@linkplain Sequence} backed by a {@linkplain RandomAccessFile}.
+ * 
+ * @author AzureTriple
+ * 
+ * @implSpec Although this specific class does not implement the
+ *           {@linkplain MutableSequence} interface, it does not guarantee that
+ *           the file itself will not be modified by external processes.
+ */
+public class FileSequence implements Sequence,AutoCloseable {
+    protected static final File TMP_DIR;
+    static {
+        // Create temporary directories
+        TMP_DIR = Paths.get(System.getProperty("user.dir"),"sequence-tmp").toFile();
+        TMP_DIR.mkdir();
+        TMP_DIR.deleteOnExit();
+    }
+    
+    protected static enum Mutability {
+        IMMUTABLE("r",true),
+        MUTABLE("rw",false);
+        
+        public final String mode;
+        public final boolean shared;
+        private Mutability(final String mode,final boolean shared) {
+            this.mode = mode;
+            this.shared = shared;
+        }
+    }
+    
+    private String suffix;
     private File file;
     private RandomAccessFile data;
     private long start,end,length; // Measured in bytes (2 bytes/char).
+    private final Mutability mutability;
     
-    protected String mode() {return "r";}
-    private FileSequence(final File file,final long start,final long end,final long length)
-                         throws UncheckedIOException,SecurityException {
-        try {data = new RandomAccessFile(this.file = file,mode());}
-        catch(final FileNotFoundException e) {throw new UncheckedIOException(e);}
+    protected FileSequence(final File file,final long start,final long end,final long length,
+                           final Mutability mutability,final String suffix)
+                           throws UncheckedIOException,SecurityException {
+        try {data = new RandomAccessFile(this.file = file,(this.mutability = mutability).mode);}
+        catch(final IOException e) {throw new UncheckedIOException(e);}
+        this.start = start;
+        this.length = length;
+        this.end = end;
+        this.suffix = suffix;
+    }
+    protected FileSequence(final File file,final RandomAccessFile data,
+                           final long start,final long end,final long length,
+                           final Mutability mutability,final String suffix) {
+        this.file = file;
+        this.data = data;
         this.start = start;
         this.end = end;
         this.length = length;
+        this.mutability = mutability;
+        this.suffix = suffix;
     }
     
     public static class FileSequenceBuilder {
         private File data = null;
         private Long start = null,end = null,length = null;
+        protected Mutability mutability() {return Mutability.IMMUTABLE;}
         
         public FileSequenceBuilder data(final File data) {
             this.data = data;
@@ -39,7 +87,7 @@ public class FileSequence implements Sequence {
             return this;
         }
         public FileSequenceBuilder data(final String data) {
-            this.data = data == null? null : new File(data);
+            this.data = new File(data);
             return this;
         }
         public FileSequenceBuilder start(final Long start) {
@@ -79,7 +127,7 @@ public class FileSequence implements Sequence {
         
         public Sequence build() throws FileNotFoundException,SecurityException,IOException {
             final long dataLength;
-            if(data == null || (dataLength = data.length()) == 0L) return EMPTY;
+            if(data == null || !data.isFile() || (dataLength = data.length()) == 0L) return EMPTY;
             
             if(start == null) start = 0L;
             else if(dataLength < start || start < 0L && (start += dataLength) < 0L)
@@ -90,29 +138,47 @@ public class FileSequence implements Sequence {
             
             if(end == null) {
                 if(length == null) length = (end = dataLength) - start;
-                else if(length < 0 || (end = length + start) > dataLength)
+                else if(length < 0L || (end = length + start) > dataLength)
                     throw new IllegalArgumentException(
                         "Length %d is invalid."
                         .formatted(length)
                     );
             } else {
-                if(dataLength < end || end < 0 && (end += dataLength) < 0)
+                if(dataLength < end || end < 0L && (end += dataLength) < 0L)
                     throw new IllegalArgumentException(
                         "Invalid end index %d for array of length %d."
                         .formatted(end,dataLength)
                     );
-                if((length = end - start) < 0)
+                if((length = end - start) < 0L)
                     throw new IllegalArgumentException(
                         "Invalid range: [%d,%d)"
                         .formatted(start,end)
                     );
             }
+            if(length == 0L) return EMPTY;
             if(length % 2 != 0)
                 throw new IllegalArgumentException(
                     "The range [%d,%d) has odd length %d."
                     .formatted(start,end,length)
                 );
-            return length == 0? EMPTY : new FileSequence(data,start,end,length);
+            // Make temporary file which contains characters with a fixed size.
+            final String suffix;
+            {
+                final File tmp = Files.createTempFile(
+                    TMP_DIR.toPath(),
+                    null,
+                    suffix = ".%s.%s".formatted(mutability().toString(),data.getName())
+                ).toFile();
+                tmp.deleteOnExit();
+                FixedSizeCharset.transfer(data,tmp,StandardCharsets.UTF_8);
+                data = tmp;
+            }
+            return new FileSequence(
+                data,
+                start,end,length,
+                mutability(),
+                suffix
+            );
         }
     }
     public static FileSequenceBuilder builder() {return new FileSequenceBuilder();}
@@ -162,36 +228,32 @@ public class FileSequence implements Sequence {
     
     protected FileSequence internalSS(final long start,final long end)
                                       throws UncheckedIOException,SecurityException {
-        return new FileSequence(file,start,end,end - start);
+        return new FileSequence(file,start,end,end - start,mutability,suffix);
     }
     /**
-     * Same as {@linkplain #subSequence(int,int)}, but takes long values to account
-     * for the size difference.
-     * 
-     * @param start Index of the first character (inclusive).
-     * @param end   Index of the last character (exclusive).
-     * 
-     * @throws IndexOutOfBoundsException The indices represent an invalid range or
-     *                                   {@linkplain #idx(long)} threw.
-     * 
-     * @see #idx(long)
+     * Same as {@linkplain #idx(long)}, except <code>end</code> is included in the
+     * range of valid indices.
      */
+    protected long ssidx(final long idx) throws IndexOutOfBoundsException {
+        final long out = idx + (idx < 0L? end : start);
+        if(end < out || out < start)
+            throw new IndexOutOfBoundsException(
+                "%d is outside the range [%d,%d] (shifted: %d,[0,%d])."
+                .formatted(idx,start,end,out - start,end - start)
+            );
+        return out;
+    }
+    @Override
     public FileSequence subSequence(long start,long end) throws IndexOutOfBoundsException,
                                                                 UncheckedIOException,
                                                                 SecurityException {
-        if((end = idx(end)) < (start = idx(start)))
+        if((end = ssidx(end)) < (start = ssidx(start)))
             throw new IndexOutOfBoundsException(
                 "Range [%d,%d) is invalid."
                 .formatted(end,start)
             );
         return internalSS(start,end);
     }
-    /**
-     * @throws IndexOutOfBoundsException The indices represent an invalid range or
-     *                                   {@linkplain #idx(long)} threw.
-     * 
-     * @see #subSequence(long,long)
-     */
     @Override
     public FileSequence subSequence(final int start,final int end) throws IndexOutOfBoundsException,
                                                                           UncheckedIOException,
@@ -200,30 +262,59 @@ public class FileSequence implements Sequence {
     }
     
     /**
-     * A {@linkplain SequenceIterator} view of the characters stored in a file. This
-     * class locks the relevant region of the file in order to ensure that data does
-     * not change during iteration.
+     * A {@linkplain SimpleSequenceIterator} view of the characters stored in a
+     * file.
      */
-    public abstract class FileSequenceIterator implements SequenceIterator,AutoCloseable {
-        protected final FileLock lock;
-        protected final long viewStart,viewEnd;
-        protected final File viewFile;
+    public class SimpleFileSequenceIterator implements Iterator<Character>,AutoCloseable {
+        protected final File viewFile = file;
         protected final RandomAccessFile viewData;
-        protected String mode() {return "r";}
-        {
-            try {
-                // Create new view of the data to prevent interference. TODO test
-                lock = (viewData = new RandomAccessFile(viewFile = file,mode())).getChannel().tryLock(start,length,true);
-                if(lock == null) throw new OverlappingFileLockException();
-            } catch(final OverlappingFileLockException e) {throw new UncheckedIOException(new IOException(e));}
+        protected final long viewEnd = end;
+        protected long cursor = start;
+        
+        protected SimpleFileSequenceIterator() throws UncheckedIOException,SecurityException {
+            // Create new view of the data to prevent interference.
+            try {viewData = new RandomAccessFile(viewFile,"r");}
             catch(final IOException e) {throw new UncheckedIOException(e);}
-            viewStart = start;
-            viewEnd = end;
         }
+        
+        @Override public boolean hasNext() {return cursor != viewEnd;}
+        @Override
+        public Character next() throws NoSuchElementException,UncheckedIOException {
+            if(cursor == viewEnd) throw new NoSuchElementException();
+            ++cursor;
+            try {return viewData.readChar();}
+            catch(final IOException e) {throw new UncheckedIOException(e);}
+        }
+        
+        @Override public void close() throws IOException {viewData.close();}
+    }
+    /**
+     * @implNote The {@linkplain SimpleFileSequenceIterator} class is
+     *           {@linkplain AutoCloseable} to ensure that the backing file is
+     *           closed. Therefore, this method should be called in a
+     *           try-with-resourses block.
+     * 
+     * @see sequence.Sequence#iterator()
+     */
+    @Override
+    public SimpleFileSequenceIterator iterator() throws UncheckedIOException,
+                                                        SecurityException {
+        return new SimpleFileSequenceIterator();
+    }
+    
+    /**A {@linkplain SequenceIterator} view of the characters stored in a file.*/
+    public abstract class FileSequenceIterator implements SequenceIterator,AutoCloseable {
+        protected final String viewSuffix = suffix;
+        protected final long viewStart = start,viewEnd = end;
+        protected final File viewFile = file;
+        protected final RandomAccessFile viewData;
         protected long cursor,mark; // Indices are measured in bytes (2 bytes/char).
         
         protected FileSequenceIterator(final long begin) throws UncheckedIOException,
                                                                 SecurityException {
+            // Create new view of the data to prevent interference.
+            try {viewData = new RandomAccessFile(viewFile,mutability.mode);}
+            catch(final IOException e) {throw new UncheckedIOException(e);}
             cursor = mark = begin;
         }
         
@@ -301,7 +392,7 @@ public class FileSequence implements Sequence {
                     "Range [%d,%d) is invalid."
                     .formatted(a,b)
                 );
-            return new FileSequence(viewFile,a,b,b - a);
+            return new FileSequence(viewFile,a,b,b - a,mutability,viewSuffix);
         }
         
         protected abstract long strBegin();
@@ -320,7 +411,7 @@ public class FileSequence implements Sequence {
             } catch(final IOException e) {throw new UncheckedIOException(e);}
         }
         
-        @Override public void close() throws IOException {lock.release();}
+        @Override public void close() throws IOException {viewData.close();}
     }
     /**Forward File Sequence Iterator*/
     protected class FFSI extends FileSequenceIterator {
@@ -375,8 +466,8 @@ public class FileSequence implements Sequence {
         public void mark(final long offset) throws IndexOutOfBoundsException {
             if(oob(mark = offset(offset)) && mark != viewEnd)
                 throw new IndexOutOfBoundsException(
-                    "Cannot mark index %d (range: [%d,%d),input: %d)."
-                    .formatted(mark,start,end,offset)
+                    "Cannot mark index %d (range: [%d,%d],input: %d)."
+                    .formatted(mark,viewStart,viewEnd,offset)
                 );
         }
         
@@ -452,31 +543,23 @@ public class FileSequence implements Sequence {
     }
     
     /**
-     * @throws UncheckedIOException The iterator could not be created, likely
-     *                              because another iterator locked the backing
-     *                              file.
-     * 
      * @implNote The {@linkplain FileSequenceIterator} class is
-     *           {@linkplain AutoCloseable} to ensure that the file lock used to
-     *           control access to the data is released. Therefore, this method
-     *           should be called in a try-with-resourses block.
+     *           {@linkplain AutoCloseable} to ensure that the backing file is
+     *           closed. Therefore, this method should be called in a
+     *           try-with-resourses block.
      * 
      * @see sequence.Sequence#iterator()
      */
     @Override
-    public FileSequenceIterator iterator() throws UncheckedIOException,
-                                                  SecurityException {
+    public FileSequenceIterator forwardIterator() throws UncheckedIOException,
+                                                         SecurityException {
         return new FFSI();
     }
     /**
-     * @throws UncheckedIOException The iterator could not be created, likely
-     *                              because another iterator locked the backing
-     *                              file.
-     * 
      * @implNote The {@linkplain FileSequenceIterator} class is
-     *           {@linkplain AutoCloseable} to ensure that the file lock used to
-     *           control access to the data is released. Therefore, this method
-     *           should be called in a try-with-resourses block.
+     *           {@linkplain AutoCloseable} to ensure that the backing file is
+     *           closed. Therefore, this method should be called in a
+     *           try-with-resourses block.
      * 
      * @see sequence.Sequence#iterator()
      */
@@ -485,6 +568,8 @@ public class FileSequence implements Sequence {
                                                          SecurityException {
         return new RFSI();
     }
+    
+    @Override public void close() throws IOException {data.close();}
 }
 
 

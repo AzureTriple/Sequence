@@ -10,7 +10,7 @@ import java.util.Iterator;
  */
 public interface Sequence extends CharSequence,Comparable<CharSequence>,Iterable<Character> {
     /**An iterator which traverses the characters in a {@linkplain Sequence}.*/
-    public static interface SequenceIterator extends Iterator<Character> {
+    interface SequenceIterator extends Iterator<Character> {
         /**
          * @return The index of the character returned by {@linkplain #peek()}, adjusted
          *         to the current sequence's range.
@@ -133,7 +133,7 @@ public interface Sequence extends CharSequence,Comparable<CharSequence>,Iterable
      * @see java.lang.Iterable#iterator()
      * @see SequenceIterator
      */
-    @Override SequenceIterator iterator();
+    SequenceIterator forwardIterator();
     /**
      * @return An iterator which iterates in the opposite direction as the one
      *         returned by {@linkplain #iterator()}.
@@ -184,7 +184,7 @@ public interface Sequence extends CharSequence,Comparable<CharSequence>,Iterable
     @Override
     default int compareTo(final CharSequence o) {
         if(o == null) return 1;
-        final SequenceIterator a = iterator();
+        final Iterator<Character> a = iterator();
         if(o instanceof Sequence) {
             for(
                 final Iterator<Character> b = ((Sequence)o).iterator();
@@ -203,9 +203,33 @@ public interface Sequence extends CharSequence,Comparable<CharSequence>,Iterable
         }
     }
     
+    /**
+     * Returns the sequence of characters between the two indices.
+     * 
+     * @throws IndexOutOfBoundsException The indices represent an invalid range or
+     *                                   at least one of the indices satisfies
+     *                                   <code>|index| &gt size()</code>.
+     * 
+     * @see #subSequence(long,long)
+     */
+    @Override Sequence subSequence(int start,int end) throws IndexOutOfBoundsException;
+    /**
+     * Same as {@linkplain #subSequence(int,int)}, but takes long values to account
+     * for the size difference.
+     * 
+     * @param start Index of the first character (inclusive).
+     * @param end   Index of the last character (exclusive).
+     * 
+     * @throws IndexOutOfBoundsException The indices represent an invalid range or
+     *                                   at least one of the indices satisfies
+     *                                   <code>|index| &gt size()</code>.
+     */
+    Sequence subSequence(long start,long end) throws IndexOutOfBoundsException;
+    
     /**A shared instance of an empty sequence.*/
-    public static final Sequence EMPTY = new Sequence() {
+    Sequence EMPTY = new Sequence() {
         @Override public Sequence subSequence(int start,int end) {return EMPTY;}
+        @Override public Sequence subSequence(long start,long end) {return EMPTY;}
         @Override public int length() {return 0;}
         @Override public char charAt(int index) {return 0;}
         
@@ -235,7 +259,8 @@ public interface Sequence extends CharSequence,Comparable<CharSequence>,Iterable
             @Override public EMPTYITR jumpOffset(int offset) {return this;}
             @Override public EMPTYITR jumpOffset(long offset) {return this;}
         }
-        @Override public SequenceIterator iterator() {return new EMPTYITR();}
+        @Override public Iterator<Character> iterator() {return new EMPTYITR();}
+        @Override public SequenceIterator forwardIterator() {return new EMPTYITR();}
         @Override public SequenceIterator reverseIterator() {return new EMPTYITR();}
     };
 }
