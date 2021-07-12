@@ -18,6 +18,7 @@ import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.io.OutputStream;
 import java.io.OutputStreamWriter;
+import java.io.RandomAccessFile;
 import java.io.Reader;
 import java.io.Writer;
 import java.nio.ByteBuffer;
@@ -39,7 +40,7 @@ public final class FixedSizeCharset extends Charset {
                                          Fixed_2 = new FixedSizeCharset(2),
                                          Fixed_3 = new FixedSizeCharset(3);
     
-    /**number of bytes per char.*/
+    /**Number of bytes per char.*/
     public final int size;
     
     /**
@@ -48,9 +49,25 @@ public final class FixedSizeCharset extends Charset {
      * @param size <code>true</code> to specify 2 bytes per character, or
      *             <code>false</code> to specify 1 byte per character.
      */
-    public FixedSizeCharset(final int size) {
+    private FixedSizeCharset(final int size) {
         super("Fixed-"+size,null);
         this.size = size;
+    }
+    
+    /**
+     * @return A fixed size charset with the specified number of bytes per
+     *         character.
+     * 
+     * @throws IllegalArgumentException The size is less than one.
+     */
+    public static FixedSizeCharset withSize(final int size) throws IllegalArgumentException {
+        if(size < 1) throw new IllegalArgumentException("Invalid size: "+size);
+        return switch(size) {
+            case 1 -> Fixed_1;
+            case 2 -> Fixed_2;
+            case 3 -> Fixed_3;
+            default-> new FixedSizeCharset(size);
+        };
     }
     
     @Override
@@ -459,7 +476,7 @@ public final class FixedSizeCharset extends Charset {
      * encoded using a {@linkplain FixedSizeCharset}.
      * 
      * @throws IllegalArgumentException <code>from</code> and/or <code>to</code> is
-     *                                  negative.
+     *                                  less than one.
      * @throws NullPointerException     The file is null.
      */
     public static void resize(final File f,final int from,final int to) throws IOException,
@@ -467,8 +484,8 @@ public final class FixedSizeCharset extends Charset {
                                                                                NullPointerException,
                                                                                SecurityException {
         if(f == null) throw new NullPointerException("File is null.");
-        if(from < 0) throw new IllegalArgumentException("Negative size for input 'from': " + from);
-        if(to < 0) throw new IllegalArgumentException("Negative size for input 'to': " + to);
+        if(from < 1) throw new IllegalArgumentException("Invalid size for input 'from': " + from);
+        if(to < 1) throw new IllegalArgumentException("Invalid size for input 'to': " + to);
         if(from == to) return;
         resize(
             f,
@@ -568,11 +585,10 @@ public final class FixedSizeCharset extends Charset {
      * Copies characters encoded by the specified charset from the source file and
      * writes them using the smallest {@linkplain FixedSizeCharset} possible.
      * 
-     * @return <code>true</code> iff there are two bytes per char,
-     *         <code>false</code> if there is one byte per char.
+     * @return The {@linkplain FixedSizeCharset} used to encode the data.
      */
-    public static boolean transfer(final File src,final File dst,final Charset cs)
-                                   throws IOException,SecurityException {
+    public static FixedSizeCharset transfer(final File src,final File dst,final Charset cs)
+                                            throws IOException,SecurityException {
         
         // If the charset encoder is 1 byte per char, do a simple copy.
         if(cs.canEncode() && cs.newEncoder().maxBytesPerChar() == 1f)
@@ -600,12 +616,47 @@ public final class FixedSizeCharset extends Charset {
                         r1.get(); r2.get();
                     } catch(final Exception e) {throw new IOException(e);}
                     // Check to see if the encoder received a 2-byte character.
-                    if(((Eauto)f2).big) return true;
+                    if(((Eauto)f2).big) return Fixed_2;
                 }
                 // Move the condensed data back to the original file.
                 writeAndTruncate(tmp,dst);
             } finally {tmp.delete();}
         }
-        return false;
+        return Fixed_1;
+    }
+    
+    /**
+     * Reads a file encoded by this charset and returns a string representing the
+     * contents with the specified maximum size (in characters).
+     * 
+     * @throws NullPointerException     The file is <code>null</code>.
+     * @throws IllegalArgumentException The size is negative.
+     * @throws OutOfMemoryError         The specified size was too large.
+     */
+    public String stringDecode(final int size,final File f) throws NullPointerException,
+                                                                   IllegalArgumentException,
+                                                                   IOException,OutOfMemoryError {
+        if(size < 0) throw new IllegalArgumentException("Negative size: " + size);
+        if(size == 0) return "";
+        final char[] chr = new char[size];
+        final int nchr;
+        try(final BufferedReader I = bisr(f,(D)newDecoder())) {nchr = I.read(chr);}
+        return String.valueOf(chr,0,nchr);
+    }
+    /**
+     * Reads a file encoded by this charset and returns a string representing the
+     * contents with the specified maximum size (in characters).
+     * 
+     * @throws NullPointerException     The file is <code>null</code>.
+     * @throws IllegalArgumentException The size is negative.
+     * @throws OutOfMemoryError         The specified size was too large.
+     */
+    public String stringDecode(final int size,final RandomAccessFile f) throws NullPointerException,
+                                                                               IllegalArgumentException,
+                                                                               IOException,OutOfMemoryError {
+        if(size < 0) throw new IllegalArgumentException("Negative size: " + size);
+        if(size == 0) return "";
+        final byte[] byt = new byte[size * this.size];
+        return new String(byt,0,f.read(byt),this);
     }
 }

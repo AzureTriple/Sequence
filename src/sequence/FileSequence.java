@@ -8,7 +8,6 @@ import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.io.RandomAccessFile;
 import java.io.UncheckedIOException;
-import java.nio.channels.FileChannel.MapMode;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -48,11 +47,13 @@ public class FileSequence implements Sequence,AutoCloseable {
     private String suffix;
     private File file;
     private RandomAccessFile data;
+    private FixedSizeCharset cs;
     private long start,end,length; // Measured in bytes (2 bytes/char).
     private final Mutability mutability;
     
     protected FileSequence(final File file,final long start,final long end,final long length,
-                           final Mutability mutability,final String suffix)
+                           final Mutability mutability,final String suffix,
+                           final FixedSizeCharset cs)
                            throws UncheckedIOException,SecurityException {
         try {data = new RandomAccessFile(this.file = file,(this.mutability = mutability).mode);}
         catch(final IOException e) {throw new UncheckedIOException(e);}
@@ -60,10 +61,12 @@ public class FileSequence implements Sequence,AutoCloseable {
         this.length = length;
         this.end = end;
         this.suffix = suffix;
+        this.cs = cs;
     }
     protected FileSequence(final File file,final RandomAccessFile data,
                            final long start,final long end,final long length,
-                           final Mutability mutability,final String suffix) {
+                           final Mutability mutability,final String suffix,
+                           final FixedSizeCharset cs) {
         this.file = file;
         this.data = data;
         this.start = start;
@@ -71,6 +74,7 @@ public class FileSequence implements Sequence,AutoCloseable {
         this.length = length;
         this.mutability = mutability;
         this.suffix = suffix;
+        this.cs = cs;
     }
     
     public static class FileSequenceBuilder {
@@ -163,6 +167,7 @@ public class FileSequence implements Sequence,AutoCloseable {
                 );
             // Make temporary file which contains characters with a fixed size.
             final String suffix;
+            final FixedSizeCharset cs;
             {
                 final File tmp = Files.createTempFile(
                     TMP_DIR.toPath(),
@@ -170,21 +175,22 @@ public class FileSequence implements Sequence,AutoCloseable {
                     suffix = ".%s.%s".formatted(mutability().toString(),data.getName())
                 ).toFile();
                 tmp.deleteOnExit();
-                FixedSizeCharset.transfer(data,tmp,StandardCharsets.UTF_8);
+                cs = FixedSizeCharset.transfer(data,tmp,StandardCharsets.UTF_8);
                 data = tmp;
             }
             return new FileSequence(
                 data,
                 start,end,length,
                 mutability(),
-                suffix
+                suffix,
+                cs
             );
         }
     }
     public static FileSequenceBuilder builder() {return new FileSequenceBuilder();}
     
     @Override public int length() {return (int)size();}
-    @Override public long size() {return length / 2L;}
+    @Override public long size() {return length / cs.size;}
     
     /**
      * @param idx   The index of the desired character. Negative values indicate an
@@ -196,9 +202,9 @@ public class FileSequence implements Sequence,AutoCloseable {
      * 
      * @throws IndexOutOfBoundsException <code>|idx| &ge; (end - start)</code>
      */
-    protected static long idx(final long idx,final long start,final long end)
+    protected static long idx(final long idx,final long start,final long end,final long scalar)
                               throws IndexOutOfBoundsException {
-        final long out = idx * 2L + (idx < 0L? end : start);
+        final long out = idx * scalar + (idx < 0L? end : start);
         if(end <= out || out < start)
             throw new IndexOutOfBoundsException(
                 "%d is outside the range [%d,%d) (shifted: %d,[0,%d))."
@@ -214,7 +220,7 @@ public class FileSequence implements Sequence,AutoCloseable {
      * 
      * @throws IndexOutOfBoundsException <code>|idx| &ge; size()</code>
      */
-    protected long idx(final long idx) throws IndexOutOfBoundsException {return idx(idx,start,end);}
+    protected long idx(final long idx) throws IndexOutOfBoundsException {return idx(idx,start,end,cs.size);}
     
     @Override
     public char charAt(final long index) throws IndexOutOfBoundsException,UncheckedIOException {
@@ -228,7 +234,7 @@ public class FileSequence implements Sequence,AutoCloseable {
     
     protected FileSequence internalSS(final long start,final long end)
                                       throws UncheckedIOException,SecurityException {
-        return new FileSequence(file,start,end,end - start,mutability,suffix);
+        return new FileSequence(file,start,end,end - start,mutability,suffix,cs);
     }
     /**
      * Same as {@linkplain #idx(long)}, except <code>end</code> is included in the
@@ -308,6 +314,8 @@ public class FileSequence implements Sequence,AutoCloseable {
         protected final long viewStart = start,viewEnd = end;
         protected final File viewFile = file;
         protected final RandomAccessFile viewData;
+        protected final FixedSizeCharset viewCS = cs;
+        protected final int scalar = viewCS.size;
         protected long cursor,mark; // Indices are measured in bytes (2 bytes/char).
         
         protected FileSequenceIterator(final long begin) throws UncheckedIOException,
@@ -326,7 +334,7 @@ public class FileSequence implements Sequence,AutoCloseable {
         protected abstract long offset(long i);
         protected boolean oob(final long i) {return viewEnd <= i || i < viewStart;}
         
-        @Override public long index() {return (cursor - viewStart) / 2L;}
+        @Override public long index() {return (cursor - viewStart) / scalar;}
         @Override public FileSequence getParent() {return FileSequence.this;}
         
         @Override
@@ -365,7 +373,7 @@ public class FileSequence implements Sequence,AutoCloseable {
         }
         @Override
         public FileSequenceIterator jumpTo(final long index) throws IndexOutOfBoundsException {
-            cursor = FileSequence.idx(index,viewStart,viewEnd);
+            cursor = FileSequence.idx(index,viewStart,viewEnd,scalar);
             return this;
         }
         @Override
@@ -392,23 +400,15 @@ public class FileSequence implements Sequence,AutoCloseable {
                     "Range [%d,%d) is invalid."
                     .formatted(a,b)
                 );
-            return new FileSequence(viewFile,a,b,b - a,mutability,viewSuffix);
+            return new FileSequence(viewFile,a,b,b - a,mutability,viewSuffix,viewCS);
         }
         
         protected abstract long strBegin();
         protected abstract long strLength();
         @Override
         public String toString() throws UncheckedIOException {
-            try {
-                return StandardCharsets.UTF_8.decode(
-                    viewData.getChannel()
-                            .map(
-                                MapMode.READ_ONLY,
-                                strBegin(),
-                                strLength()
-                            )
-                ).toString();
-            } catch(final IOException e) {throw new UncheckedIOException(e);}
+            try {return viewCS.stringDecode(0,viewData);}
+            catch(final IOException e) {throw new UncheckedIOException(e);}
         }
         
         @Override public void close() throws IOException {viewData.close();}
@@ -417,8 +417,8 @@ public class FileSequence implements Sequence,AutoCloseable {
     protected class FFSI extends FileSequenceIterator {
         public FFSI() throws UncheckedIOException,SecurityException {super(start);}
         
-        @Override protected void increment() {cursor += 2L;}
-        @Override protected long offset(final long i) {return cursor + i * 2L;}
+        @Override protected void increment() {cursor += scalar;}
+        @Override protected long offset(final long i) {return cursor + i * scalar;}
         
         @Override public boolean hasNext() {return cursor != viewEnd;}
         
@@ -430,17 +430,17 @@ public class FileSequence implements Sequence,AutoCloseable {
                     do {
                         final char c = viewData.readChar();
                         if(!Character.isWhitespace(c)) return c;
-                    } while((cursor += 2L) != viewEnd);
+                    } while((cursor += scalar) != viewEnd);
                 } catch(final IOException e) {throw new UncheckedIOException(e);}
             }
             return null;
         }
         @Override
         public Character peekNextNonWS() throws UncheckedIOException {
-            if(!oob(cursor + 2L)) {
+            if(!oob(cursor + scalar)) {
                 try {
-                    viewData.seek(cursor + 2L);
-                    for(long tmp = cursor;(tmp += 2L) != viewEnd;) {
+                    viewData.seek(cursor + scalar);
+                    for(long tmp = cursor;(tmp += scalar) != viewEnd;) {
                         final char c = viewData.readChar();
                         if(!Character.isWhitespace(c)) return c;
                     }
@@ -450,13 +450,13 @@ public class FileSequence implements Sequence,AutoCloseable {
         }
         @Override
         public Character nextNonWS() throws UncheckedIOException {
-            if(hasNext() && (cursor += 2L) != viewEnd) {
+            if(hasNext() && (cursor += scalar) != viewEnd) {
                 try {
                     viewData.seek(cursor);
                     do {
                         final char c = viewData.readChar();
                         if(!Character.isWhitespace(c)) return c;
-                    } while((cursor += 2L) != viewEnd);
+                    } while((cursor += scalar) != viewEnd);
                 } catch(final IOException e) {throw new UncheckedIOException(e);}
             }
             return null;
@@ -479,12 +479,12 @@ public class FileSequence implements Sequence,AutoCloseable {
     }
     /**Reverse File Sequence Iterator*/
     protected class RFSI extends FileSequenceIterator {
-        public RFSI() throws UncheckedIOException,SecurityException {super(end - 2L);}
+        public RFSI() throws UncheckedIOException,SecurityException {super(end - cs.size);}
         
-        @Override protected void increment() {cursor -= 2L;}
-        @Override protected long offset(final long i) {return cursor - i * 2L;}
+        @Override protected void increment() {cursor -= scalar;}
+        @Override protected long offset(final long i) {return cursor - i * scalar;}
         
-        @Override public boolean hasNext() {return cursor != viewStart - 2L;}
+        @Override public boolean hasNext() {return cursor != viewStart - scalar;}
         
         @Override
         public Character skipWS() throws UncheckedIOException {
@@ -494,17 +494,17 @@ public class FileSequence implements Sequence,AutoCloseable {
                         viewData.seek(cursor);
                         final char c = viewData.readChar();
                         if(!Character.isWhitespace(c)) return c;
-                    } while((cursor -= 2L) != viewStart - 2L);
+                    } while((cursor -= scalar) != viewStart - scalar);
                 } catch(final IOException e) {throw new UncheckedIOException(e);}
             }
             return null;
         }
         @Override
         public Character peekNextNonWS() throws UncheckedIOException {
-            if(cursor != viewStart) { // equivalent to (cursor - 2L != viewStart - 2L)
+            if(cursor != viewStart) { // equivalent to (cursor - scalar != viewStart - scalar)
                 try {
                     for(long tmp = cursor;tmp != viewStart;) {
-                        data.seek(tmp -= 2L);
+                        data.seek(tmp -= scalar);
                         final char c = data.readChar();
                         if(!Character.isWhitespace(c)) return c;
                     }
@@ -514,13 +514,13 @@ public class FileSequence implements Sequence,AutoCloseable {
         }
         @Override
         public Character nextNonWS() throws UncheckedIOException {
-            if(hasNext() && (cursor -= 2L) != viewStart - 2L) {
+            if(hasNext() && (cursor -= scalar) != viewStart - scalar) {
                 try {
                     do {
                         data.seek(cursor);
                         final char c = data.readChar();
                         if(!Character.isWhitespace(c)) return c;
-                    } while((cursor -= 2L) != viewStart - 2L);
+                    } while((cursor -= scalar) != viewStart - scalar);
                 } catch(final IOException e) {throw new UncheckedIOException(e);}
             }
             return null;
@@ -528,18 +528,18 @@ public class FileSequence implements Sequence,AutoCloseable {
         
         @Override
         public void mark(final long offset) throws IndexOutOfBoundsException {
-            if(oob(mark = offset(offset)) && mark != viewStart - 2L)
+            if(oob(mark = offset(offset)) && mark != viewStart - scalar)
                 throw new IndexOutOfBoundsException(
                     "Cannot mark index %d (range: [%d,%d),input: %d)."
-                    .formatted(mark + 2L,viewStart,viewEnd,offset)
+                    .formatted(mark + scalar,viewStart,viewEnd,offset)
                 );
         }
         
-        @Override protected long subBegin() {return cursor + 2L;}
-        @Override protected long subEnd() {return mark + 2L;}
+        @Override protected long subBegin() {return cursor + scalar;}
+        @Override protected long subEnd() {return mark + scalar;}
         
-        @Override protected long strBegin() {return cursor + 2L;}
-        @Override protected long strLength() {return viewEnd - cursor - 2L;}
+        @Override protected long strBegin() {return cursor + scalar;}
+        @Override protected long strLength() {return viewEnd - cursor - scalar;}
     }
     
     /**
