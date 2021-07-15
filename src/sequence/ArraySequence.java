@@ -1,15 +1,16 @@
 package sequence;
 
-import java.util.Arrays;
-import java.util.Iterator;
 import java.util.NoSuchElementException;
 import java.util.function.Consumer;
+
+import util.NoIO;
 
 /**
  * A {@linkplain Sequence} backed by a character array.
  * 
  * @author AzureTriple
  */
+@NoIO
 public class ArraySequence implements Sequence {
     protected char[] data;
     protected int start,end,length;
@@ -133,13 +134,15 @@ public class ArraySequence implements Sequence {
     protected int idx(final int idx) throws IndexOutOfBoundsException {
         return idx(idx,start,end);
     }
-    @Override public char charAt(final int index) throws IndexOutOfBoundsException {return data[idx(index)];}
+    @NoIO @Override public char charAt(final int index) throws IndexOutOfBoundsException {return data[idx(index)];}
+    @NoIO @Override public char charAt(final long index) throws IndexOutOfBoundsException {return charAt((int)index);}
     
     /**
-     * Same as {@linkplain #idx(int)}, except <code>end</code> is included in the
-     * range of valid indices.
+     * Same as {@linkplain #idx(int,int,int)}, except <code>end</code> is
+     * included in the range of valid indices.
      */
-    protected int ssidx(final int idx) throws IndexOutOfBoundsException {
+    protected static int ssidx(final int idx,final int start,final int end)
+                               throws IndexOutOfBoundsException {
         final int out = idx + (idx < 0? end : start);
         if(end < out || out < start)
             throw new IndexOutOfBoundsException(
@@ -148,7 +151,12 @@ public class ArraySequence implements Sequence {
             );
         return out;
     }
-    @Override
+    /**
+     * Same as {@linkplain #idx(int)}, except <code>end</code> is included in the
+     * range of valid indices.
+     */
+    protected int ssidx(final int idx) throws IndexOutOfBoundsException {return ssidx(idx,start,end);}
+    @NoIO @Override
     public ArraySequence subSequence(int start,int end) throws IllegalArgumentException {
         if((end = ssidx(end)) < (start = ssidx(start)))
             throw new IllegalArgumentException(
@@ -157,111 +165,117 @@ public class ArraySequence implements Sequence {
             );
         return new ArraySequence(data,start,end,end - start);
     }
-    @Override
+    @NoIO @Override
     public ArraySequence subSequence(final long start,final long end) throws IndexOutOfBoundsException {
         return subSequence((int)start,(int)end);
     }
     
-    @Override
-    public Iterator<Character> iterator() {
-        return new Iterator<>() {
-            final char[] viewData = Arrays.copyOfRange(data,start,end);
-            int cursor = 0;
-            
-            @Override public boolean hasNext() {return cursor != viewData.length;}
-            @Override
-            public Character next() throws NoSuchElementException {
-                try {return viewData[cursor++];}
-                catch(final ArrayIndexOutOfBoundsException e) {
-                    throw new NoSuchElementException(e);
-                }
-            }
-            @Override
-            public void forEachRemaining(final Consumer<? super Character> action)
-                                         throws NullPointerException {
-                while(cursor != viewData.length) action.accept(viewData[cursor++]);
-            }
-        };
+    /**Simple Array Sequence Iterator*/
+    @NoIO
+    protected class SASI implements SimpleSequenceIterator {
+        protected final char[] viewData = data;
+        protected int cursor = start;
+        protected final int viewEnd = end;
+        
+        @NoIO @Override
+        public SASI skip(final long count) throws IllegalArgumentException,
+                                                  NoSuchElementException {
+            if(count == 0L) return this;
+            if(count < 0L)
+                throw new IllegalArgumentException(
+                    "Negative offset %d."
+                    .formatted(count)
+                );
+            if(cursor + count >= viewEnd)
+                throw new NoSuchElementException(
+                    "Cannot skip %d characters after index %d."
+                    .formatted(count,cursor)
+                );
+            cursor += count;
+            return this;
+        }
+        
+        @Override public boolean hasNext() {return cursor != viewEnd;}
+        @NoIO @Override
+        public Character next() throws NoSuchElementException {
+            if(!hasNext()) throw new NoSuchElementException();
+            return viewData[cursor++];
+        }
+        
+        @NoIO @Override
+        public void forEachRemaining(final Consumer<? super Character> action) {
+            if(action == null) return;
+            while(cursor != viewEnd) action.accept(viewData[cursor++]);
+        }
+        
+        @NoIO @Override public void close() {}
     }
+    @NoIO @Override public SimpleSequenceIterator iterator() {return new SASI();}
     
     /**A {@linkplain SequenceIterator} for an {@linkplain ArraySequence}.*/
-    public abstract class ArraySequenceIterator implements SequenceIterator {
-        protected final int viewStart = start,viewEnd = end;
+    @NoIO
+    protected abstract class ASI implements SequenceIterator {
+        protected final int viewStart = start,viewEnd = end,lastIdx;
         protected final char[] viewData = data;
         protected int cursor,mark;
         
-        protected ArraySequenceIterator(final int begin) {cursor = mark = begin;}
+        protected ASI(final int begin,final int end) {
+            cursor = mark = begin;
+            lastIdx = end;
+        }
         
-        protected abstract int increment(int i);
-        protected void increment() {cursor = increment(cursor);}
         protected abstract int offset(int i);
         protected boolean oob(final int i) {return viewEnd <= i || i < viewStart;}
-        protected abstract boolean hasNext(int i);
+        protected abstract int skipidx(int i);
+        protected abstract int skipidx(long i);
         
-        @Override public long index() {return cursor;}
+        @Override public long index() {return cursor - viewStart;}
         @Override public ArraySequence getParent() {return ArraySequence.this;}
         
-        @Override public Character peek() {return hasNext()? null : viewData[cursor];}
-        @Override public Character peek(int offset) {return oob(offset = offset(offset))? null : viewData[offset];}
-        @Override public Character peek(final long offset) {return peek((int)offset);}
+        @NoIO @Override public Character peek() {return hasNext()? null : viewData[cursor];}
+        @NoIO @Override
+        public Character peek(int offset) {
+            return oob(offset = offset(offset))? null : viewData[offset];
+        }
+        @NoIO @Override public Character peek(final long offset) {return peek((int)offset);}
         
-        @Override public boolean hasNext() {return hasNext(cursor);}
-        @Override
-        public Character next() {
-            if(hasNext()) {
-                final char c = viewData[cursor];
-                increment();
-                return c;
-            }
-            return null;
-        }
+        @Override public boolean hasNext() {return cursor != lastIdx;}
+        @NoIO @Override public abstract Character next();
         
-        @Override
-        public Character skipWS() {
-            while(hasNext()) {
-                final char c = viewData[cursor];
-                if(!Character.isWhitespace(c)) return c;
-                increment();
-            }
-            return null;
-        }
-        @Override
-        public Character peekNextNonWS() {
-            if(hasNext()) {
-                for(int i = cursor;hasNext(i = increment(i));) {
-                    final char c = viewData[i];
-                    if(!Character.isWhitespace(c)) return c;
-                }
-            }
-            return null;
-        }
-        @Override
-        public Character nextNonWS() {
-            if(hasNext()) {
-                increment();
-                while(hasNext()) {
-                    final char c = viewData[cursor];
-                    if(!Character.isWhitespace(c)) return c;
-                    increment();
-                }
-            }
-            return null;
-        }
+        @NoIO protected abstract Character iSWS(final int limit);
+        @NoIO @Override public Character skipWS() {return iSWS(lastIdx);}
+        @NoIO @Override public Character skipWS(final int limit) {return iSWS(skipidx(limit));}
+        @NoIO @Override public Character skipWS(final long limit) {return iSWS(skipidx(limit));}
+        
+        @NoIO protected abstract Character iPNWS(final int limit);
+        @NoIO @Override public Character peekNonWS() {return iPNWS(lastIdx);}
+        @NoIO @Override public Character peekNonWS(final int limit) {return iPNWS(skipidx(limit));}
+        @NoIO @Override public Character peekNonWS(final long limit) {return iPNWS(skipidx(limit));}
+        
+        @NoIO protected abstract Character iPNNWS(final int limit);
+        @NoIO @Override public Character peekNextNonWS() {return iPNNWS(lastIdx);}
+        @NoIO @Override public Character peekNextNonWS(final int limit) {return iPNNWS(skipidx(limit));}
+        @NoIO @Override public Character peekNextNonWS(final long limit) {return iPNNWS(skipidx(limit));}
+        
+        @NoIO protected abstract Character iNNWS(final int limit);
+        @NoIO @Override public Character nextNonWS() {return iNNWS(lastIdx);}
+        @NoIO @Override public Character nextNonWS(final int limit) {return iNNWS(skipidx(limit));}
+        @NoIO @Override public Character nextNonWS(final long limit) {return iNNWS(skipidx(limit));}
         
         @Override public void mark() throws IndexOutOfBoundsException {mark(0);}
         @Override public void mark(final long offset) throws IndexOutOfBoundsException {mark((int)offset);}
         
         @Override
-        public ArraySequenceIterator jumpTo(final int index) throws IndexOutOfBoundsException {
+        public ASI jumpTo(final int index) throws IndexOutOfBoundsException {
             cursor = idx(index,viewStart,viewEnd);
             return this;
         }
         @Override
-        public ArraySequenceIterator jumpTo(final long index) throws IndexOutOfBoundsException {
+        public ASI jumpTo(final long index) throws IndexOutOfBoundsException {
             return jumpTo((int)index);
         }
         @Override
-        public ArraySequenceIterator jumpOffset(final int offset) throws IndexOutOfBoundsException {
+        public ASI jumpOffset(final int offset) throws IndexOutOfBoundsException {
             if(oob(cursor = offset(offset)))
                 throw new IndexOutOfBoundsException(
                     "Cannot jump to index %d (range: [%d,%d),input: %d)."
@@ -270,13 +284,13 @@ public class ArraySequence implements Sequence {
             return this;
         }
         @Override
-        public ArraySequenceIterator jumpOffset(final long offset) throws IndexOutOfBoundsException {
+        public ASI jumpOffset(final long offset) throws IndexOutOfBoundsException {
             return jumpOffset((int)offset);
         }
         
         protected abstract int subBegin();
         protected abstract int subEnd();
-        @Override
+        @NoIO @Override
         public ArraySequence subSequence() throws IndexOutOfBoundsException {
             final int a = subBegin(),b = subEnd();
             if(b < a)
@@ -289,15 +303,56 @@ public class ArraySequence implements Sequence {
         
         protected abstract int strBegin();
         protected abstract int strEnd();
-        @Override public String toString() {return new String(viewData,strBegin(),strEnd());}
+        @NoIO @Override public String toString() {return new String(viewData,strBegin(),strEnd());}
+        
+        @NoIO @Override public void close() {}
     }
     /**Forward Array Sequence Iterator*/
-    protected class FASI extends ArraySequenceIterator {
-        protected FASI() {super(start);}
+    @NoIO
+    protected class FASI extends ASI {
+        protected FASI() {super(start,end);}
         
-        @Override protected int increment(final int i) {return i + 1;}
+        @Override public long offset() {return cursor - viewStart;}
+        
         @Override protected int offset(final int i) {return cursor + i;}
-        @Override protected boolean hasNext(final int i) {return i != viewEnd;}
+        @Override protected int skipidx(final int i) {return Math.min(i,viewEnd);}
+        @Override protected int skipidx(final long i) {return (int)Math.min(i,viewEnd);}
+        
+        @NoIO @Override public Character next() {return hasNext()? viewData[cursor++] : null;}
+        
+        @NoIO @Override
+        protected Character iSWS(final int limit) {
+            // This method trusts that the cursor never underflows via jump.
+            if(cursor < limit) {
+                do if(!Character.isWhitespace(viewData[cursor])) return viewData[cursor];
+                while(++cursor != limit);
+            }
+            return null;
+        }
+        @NoIO @Override
+        protected Character iPNWS(final int limit) {
+            // This method trusts that the cursor never underflows via jump.
+            return cursor < limit? Character.isWhitespace(viewData[cursor])? iNNWS(limit)
+                                                                           : viewData[cursor]
+                                 : null;
+        }
+        @NoIO @Override
+        protected Character iPNNWS(final int limit) {
+            // This method trusts that the cursor never underflows via jump.
+            for(int tmp = cursor + 1;tmp < limit;++tmp)
+                if(!Character.isWhitespace(viewData[tmp]))
+                    return viewData[tmp];
+            return null;
+        }
+        @NoIO @Override
+        protected Character iNNWS(final int limit) {
+            // This method trusts that the cursor never underflows via jump.
+            if(cursor < limit)
+                while(++cursor != limit)
+                    if(!Character.isWhitespace(viewData[cursor]))
+                        return viewData[cursor];
+            return null;
+        }
         
         @Override
         public void mark(final int offset) throws IndexOutOfBoundsException {
@@ -315,12 +370,50 @@ public class ArraySequence implements Sequence {
         @Override protected int strEnd() {return cursor;}
     }
     /**Reverse Array Sequence Iterator.*/
-    protected class RASI extends ArraySequenceIterator {
-        protected RASI() {super(end - 1);}
+    @NoIO
+    protected class RASI extends ASI {
+        protected RASI() {super(end - 1,start - 1);}
         
-        @Override protected int increment(final int i) {return i - 1;}
+        @Override public long offset() {return viewEnd - 1 - cursor;}
+        
         @Override protected int offset(final int i) {return cursor - i;}
-        @Override protected boolean hasNext(final int i) {return i != viewStart - 1;}
+        @Override protected int skipidx(final int i) {return Math.max(i,viewStart) - 1;}
+        @Override protected int skipidx(final long i) {return (int)(Math.max(i,viewStart) - 1L);}
+        
+        @NoIO @Override public Character next() {return hasNext()? viewData[cursor--] : null;}
+        
+        @NoIO @Override
+        protected Character iSWS(final int limit) {
+            // This method trusts that the cursor never underflows via jump.
+            return cursor > limit? Character.isWhitespace(viewData[cursor])? iNNWS(limit)
+                                                                           : viewData[cursor]
+                                 : null;
+        }
+        @NoIO @Override
+        protected Character iPNWS(final int limit) {
+            // This method trusts that the cursor never underflows via jump.
+            for(int tmp = cursor;tmp > limit;--tmp)
+                if(!Character.isWhitespace(viewData[tmp]))
+                    return viewData[tmp];
+            return null;
+        }
+        @NoIO @Override
+        protected Character iPNNWS(final int limit) {
+            // This method trusts that the cursor never underflows via jump.
+            for(int tmp = cursor - 1;tmp > limit;--tmp)
+                if(!Character.isWhitespace(viewData[tmp]))
+                    return viewData[tmp];
+            return null;
+        }
+        @NoIO @Override
+        protected Character iNNWS(final int limit) {
+            // This method trusts that the cursor never underflows via jump.
+            if(cursor > limit)
+                while(--cursor != limit)
+                    if(!Character.isWhitespace(viewData[cursor]))
+                        return viewData[cursor];
+            return null;
+        }
         
         @Override
         public void mark(final int offset) throws IndexOutOfBoundsException {
@@ -338,6 +431,14 @@ public class ArraySequence implements Sequence {
         @Override protected int strEnd() {return viewEnd;}
     }
     
-    @Override public ArraySequenceIterator forwardIterator() {return new FASI();}
-    @Override public ArraySequenceIterator reverseIterator() {return new RASI();}
+    @NoIO @Override
+    public SequenceIterator forwardIterator() {
+        return isEmpty()? EMPTY.forwardIterator() : new FASI();
+    }
+    @NoIO @Override
+    public SequenceIterator reverseIterator() {
+        return isEmpty()? EMPTY.reverseIterator() : new RASI();
+    }
+    
+    @NoIO @Override public void close() {}
 }

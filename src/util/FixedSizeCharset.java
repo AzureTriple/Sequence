@@ -657,6 +657,28 @@ public final class FixedSizeCharset extends Charset {
         if(size < 0) throw new IllegalArgumentException("Negative size: " + size);
         if(size == 0) return "";
         final byte[] byt = new byte[size * this.size];
-        return new String(byt,0,f.read(byt),this);
+        final int l = f.read(byt);
+        if(l == -1) return "";
+        return new String(byt,0,l,this);
+    }
+    /**
+     * Reads a file encoded by this charset and returns a string representing the
+     * contents with the specified maximum size (in characters).
+     * 
+     * @throws NullPointerException     The file is <code>null</code>.
+     * @throws IllegalArgumentException The size or offset is negative.
+     * @throws OutOfMemoryError         The specified size was too large.
+     */
+    public String stringDecode(final int size,final RandomAccessFile f,final long offset)
+                               throws NullPointerException,IllegalArgumentException,
+                                      IOException,OutOfMemoryError {
+        if(size < 0) throw new IllegalArgumentException("Negative size: " + size);
+        if(offset < 0) throw new IllegalArgumentException("Negative offset: "+offset);
+        if(size == 0) return "";
+        final byte[] byt = new byte[size * this.size];
+        f.seek(offset);
+        final int l = f.read(byt);
+        if(l == -1) return "";
+        return new String(byt,0,l,this);
     }
 }

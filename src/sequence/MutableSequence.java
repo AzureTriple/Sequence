@@ -32,4 +32,7 @@ public interface MutableSequence extends Sequence {
         
         @Override MutableSequence subSequence() throws IndexOutOfBoundsException;
     }
+    
+    /**@return An immutable copy of this seqence.*/
+    Sequence immutableCopy();
 }
