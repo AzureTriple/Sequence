@@ -14,7 +14,12 @@ import util.NoIO;
  * @author AzureTriple
  */
 public interface Sequence extends CharSequence,Comparable<CharSequence>,Iterable<Character>,AutoCloseable {
-    /**An iterator which traverses the characters in a {@linkplain Sequence}.*/
+    /**
+     * An iterator which traverses the characters in a {@linkplain Sequence}.
+     * <p>
+     * Unless marked with {@linkplain NoIO}, implementing types should automatically
+     * close themselves when {@linkplain #hasNext()} returns <code>false</code>.
+     */
     interface SimpleSequenceIterator extends Iterator<Character>,AutoCloseable {
         /**
          * @param count Number of characters to skip.
@@ -27,6 +32,15 @@ public interface Sequence extends CharSequence,Comparable<CharSequence>,Iterable
         SimpleSequenceIterator skip(long count) throws IllegalArgumentException,
                                                        NoSuchElementException,
                                                        UncheckedIOException;
+        /**
+         * {@inheritDoc}
+         * <p>
+         * Unless marked with {@linkplain NoIO}, implementing types should automatically
+         * close themselves when {@linkplain #hasNext()} returns <code>false</code>.
+         * 
+         * @see java.util.Iterator#hasNext()
+         */
+        @Override boolean hasNext() throws UncheckedIOException;
         @Override Character next() throws NoSuchElementException,UncheckedIOException;
         @Override void forEachRemaining(Consumer<? super Character> action) throws UncheckedIOException;
         @Override default void close() throws UncheckedIOException {}
@@ -169,23 +183,31 @@ public interface Sequence extends CharSequence,Comparable<CharSequence>,Iterable
          */
         Character nextNonWS(long limit) throws UncheckedIOException;
         
-        /**Saves the current position.*/
-        void mark();
+        /**
+         * Saves the current position.
+         * 
+         * @return <code>this</code>
+         */
+        SequenceIterator mark();
         /**
          * Saves the current position offset by the argument.
          * 
-         * @throws IndexOutOfBoundsException <code>|index| &ge; size()</code>
-         */
-        void mark(int offset) throws IndexOutOfBoundsException;
-        /**
-         * Saves the current position offset by the argument.
+         * @return <code>this</code>
          * 
          * @throws IndexOutOfBoundsException <code>|index| &ge; size()</code>
          */
-        void mark(long offset) throws IndexOutOfBoundsException;
+        SequenceIterator mark(int offset) throws IndexOutOfBoundsException;
+        /**
+         * Saves the current position offset by the argument.
+         * 
+         * @return <code>this</code>
+         * 
+         * @throws IndexOutOfBoundsException <code>|index| &ge; size()</code>
+         */
+        SequenceIterator mark(long offset) throws IndexOutOfBoundsException;
         
         /**
-         * @return The sub-sequence between the first marked position (inclusive) and
+         * @return The sub-sequence between the last marked position (inclusive) and
          *         the current index (exclusive).
          * 
          * @throws IndexOutOfBoundsException The marked position was not updated
@@ -202,7 +224,8 @@ public interface Sequence extends CharSequence,Comparable<CharSequence>,Iterable
          * 
          * @throws IndexOutOfBoundsException <code>|index| &ge; size()</code>
          */
-        SequenceIterator jumpTo(int index) throws IndexOutOfBoundsException;
+        SequenceIterator jumpTo(int index) throws IndexOutOfBoundsException,
+                                                  UncheckedIOException;
         /**
          * Sets the cursor to the specified position.
          * 
@@ -210,7 +233,8 @@ public interface Sequence extends CharSequence,Comparable<CharSequence>,Iterable
          * 
          * @throws IndexOutOfBoundsException <code>|index| &ge; size()</code>
          */
-        SequenceIterator jumpTo(long index) throws IndexOutOfBoundsException;
+        SequenceIterator jumpTo(long index) throws IndexOutOfBoundsException,
+                                                   UncheckedIOException;
         /**
          * Offsets the current position.
          * 
@@ -218,7 +242,8 @@ public interface Sequence extends CharSequence,Comparable<CharSequence>,Iterable
          * 
          * @throws IndexOutOfBoundsException <code>|index()+offset| &ge; size()</code>
          */
-        SequenceIterator jumpOffset(int offset) throws IndexOutOfBoundsException;
+        SequenceIterator jumpOffset(int offset) throws IndexOutOfBoundsException,
+                                                       UncheckedIOException;
         /**
          * Offsets the current position.
          * 
@@ -226,7 +251,8 @@ public interface Sequence extends CharSequence,Comparable<CharSequence>,Iterable
          * 
          * @throws IndexOutOfBoundsException <code>|index()+offset| &ge; size()</code>
          */
-        SequenceIterator jumpOffset(long offset) throws IndexOutOfBoundsException;
+        SequenceIterator jumpOffset(long offset) throws IndexOutOfBoundsException,
+                                                        UncheckedIOException;
         
         @Override default void close() throws UncheckedIOException {}
         
@@ -326,6 +352,7 @@ public interface Sequence extends CharSequence,Comparable<CharSequence>,Iterable
         }
         return Long.compare(size(),oSize);
     }
+    @Override boolean equals(Object obj);
     
     /**
      * Returns the sequence of characters between the two indices.
@@ -358,6 +385,10 @@ public interface Sequence extends CharSequence,Comparable<CharSequence>,Iterable
     
     /**A shared instance of an empty sequence.*/
     Sequence EMPTY = new Sequence() {
+        @Override
+        public boolean equals(final Object obj) {
+            return obj == this || obj instanceof CharSequence && ((CharSequence)obj).isEmpty();
+        }
         @NoIO @Override public Sequence subSequence(int start,int end) {return EMPTY;}
         @NoIO @Override public Sequence subSequence(long start,long end) {return EMPTY;}
         @Override public int length() {return 0;}
@@ -391,16 +422,16 @@ public interface Sequence extends CharSequence,Comparable<CharSequence>,Iterable
             @NoIO @Override public Character nextNonWS(int limit) {return null;}
             @NoIO @Override public Character nextNonWS(long limit) {return null;}
             
-            @Override public void mark() {}
-            @Override public void mark(int offset) {}
-            @Override public void mark(long offset) {}
+            @Override public EMPTYITR mark() {return this;}
+            @Override public EMPTYITR mark(int offset) {return this;}
+            @Override public EMPTYITR mark(long offset) {return this;}
             
             @NoIO @Override public Sequence subSequence() {return EMPTY;}
             
-            @Override public EMPTYITR jumpTo(int index) {return this;}
-            @Override public EMPTYITR jumpTo(long index) {return this;}
-            @Override public EMPTYITR jumpOffset(int offset) {return this;}
-            @Override public EMPTYITR jumpOffset(long offset) {return this;}
+            @NoIO @Override public EMPTYITR jumpTo(int index) {return this;}
+            @NoIO @Override public EMPTYITR jumpTo(long index) {return this;}
+            @NoIO @Override public EMPTYITR jumpOffset(int offset) {return this;}
+            @NoIO @Override public EMPTYITR jumpOffset(long offset) {return this;}
             
             @NoIO @Override public void forEachRemaining(Consumer<? super Character> action) {}
             @NoIO @Override public void close() {};
@@ -410,5 +441,6 @@ public interface Sequence extends CharSequence,Comparable<CharSequence>,Iterable
         @NoIO @Override public SequenceIterator reverseIterator() {return new EMPTYITR();}
         
         @NoIO @Override public void close() {}
+        @NoIO @Override public String toString() {return "";}
     };
 }

@@ -1,5 +1,9 @@
 package sequence;
 
+import static java.lang.Character.isWhitespace;
+import static java.lang.Math.max;
+import static java.lang.Math.min;
+
 import java.util.NoSuchElementException;
 import java.util.function.Consumer;
 
@@ -13,8 +17,9 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
-import sequence.Sequence.SequenceIterator;
 import util.FixedSizeCharset;
+import util.NoIO;
+import util.NoIO.Suppresses;
 
 /**
  * A {@linkplain Sequence} backed by a {@linkplain RandomAccessFile}.
@@ -93,7 +98,9 @@ public class FileSequence implements Sequence {
         big = (this.cs = cs).size > 1;
     }
     
-    protected static class FileSequenceBuilder {
+    public static class FileSequenceBuilder {
+        private FileSequenceBuilder() {}
+        
         private File data = null;
         private Long start = null,end = null,length = null;
         private Charset cs = null;
@@ -232,6 +239,11 @@ public class FileSequence implements Sequence {
     }
     public static FileSequenceBuilder builder() {return new FileSequenceBuilder();}
     
+    @Override
+    public boolean equals(final Object obj) {
+        return obj == this || obj instanceof CharSequence && compareTo((CharSequence)obj) == 0;
+    }
+    
     @Override public int length() {return (int)size();}
     @Override public long size() {return length / cs.size;}
     
@@ -330,8 +342,10 @@ public class FileSequence implements Sequence {
         
         protected SFSI() throws UncheckedIOException {
             // Create new view of the data to prevent interference.
-            try {viewData = new RandomAccessFile(viewFile,"r");}
-            catch(FileNotFoundException|SecurityException e) {throw ioe(e);}
+            try {
+                viewData = new RandomAccessFile(viewFile,"r");
+                viewData.seek(cursor);
+            } catch(IOException|SecurityException e) {throw ioe(e);}
         }
         
         @Override
@@ -354,7 +368,11 @@ public class FileSequence implements Sequence {
             return this;
         }
         
-        @Override public boolean hasNext() {return cursor != viewEnd;}
+        @Override
+        public boolean hasNext() throws UncheckedIOException {
+            if(cursor != viewEnd) return true;
+            close(); return false;
+        }
         @Override
         public Character next() throws NoSuchElementException,UncheckedIOException {
             if(!hasNext()) throw new NoSuchElementException();
@@ -383,6 +401,7 @@ public class FileSequence implements Sequence {
         
         @Override
         public void close() throws UncheckedIOException {
+            cursor = viewEnd;
             try {viewData.close();}
             catch(final IOException e) {throw ioe(e);}
         }
@@ -424,7 +443,7 @@ public class FileSequence implements Sequence {
         
         @Override
         public Character peek() throws UncheckedIOException {
-            return hasNext()? null : get(cursor);
+            return hasNext()? get(cursor) : null;
         }
         @Override
         public Character peek(final int offset) throws UncheckedIOException {
@@ -502,24 +521,25 @@ public class FileSequence implements Sequence {
             return iNNWS(skipidx(limit));
         }
         
-        @Override public void mark() throws IndexOutOfBoundsException {mark(0L);}
-        @Override public void mark(final int offset) throws IndexOutOfBoundsException {mark((long)offset);}
+        @Override public FSI mark() throws IndexOutOfBoundsException {return mark(0L);}
+        @Override public FSI mark(final int offset) throws IndexOutOfBoundsException {return mark((long)offset);}
+        @Override public abstract FSI mark(long offset) throws IndexOutOfBoundsException;
         
         /* IMPORTANT: The jump methods should NEVER send the cursor to an out-of-bounds position. */
-        @Override
+        @NoIO(suppresses = Suppresses.EXCEPTIONS) @Override
         public FSI jumpTo(final int index) throws IndexOutOfBoundsException {
             return jumpTo((long)index);
         }
-        @Override
+        @NoIO(suppresses = Suppresses.EXCEPTIONS) @Override
         public FSI jumpTo(final long index) throws IndexOutOfBoundsException {
             cursor = FileSequence.idx(index,viewStart,viewEnd,scalar);
             return this;
         }
-        @Override
+        @NoIO(suppresses = Suppresses.EXCEPTIONS) @Override
         public FSI jumpOffset(final int offset) throws IndexOutOfBoundsException {
             return jumpOffset((long)offset);
         }
-        @Override
+        @NoIO(suppresses = Suppresses.EXCEPTIONS) @Override
         public FSI jumpOffset(final long offset) throws IndexOutOfBoundsException {
             final long nc = offset(offset);
             if(oob(nc))
@@ -550,7 +570,7 @@ public class FileSequence implements Sequence {
         public String toString() throws UncheckedIOException {
             try{
                 return viewCS.stringDecode(
-                    (int)Math.min(strLength() / scalar,MAX_STRING_SIZE),
+                    (int)min(strLength() / scalar,MAX_STRING_SIZE),
                     viewData,
                     strBegin() / scalar
                 );
@@ -571,7 +591,7 @@ public class FileSequence implements Sequence {
         
         @Override protected void increment() {cursor += scalar;}
         @Override protected long offset(final long i) {return cursor + i * scalar;}
-        @Override protected long skipidx(final long i) {return Math.min(i * scalar,viewEnd);}
+        @Override protected long skipidx(final long i) {return min(i * scalar,viewEnd);}
         
         @Override
         protected Character iSWS(long limit) throws UncheckedIOException {
@@ -582,12 +602,12 @@ public class FileSequence implements Sequence {
                     if(viewBig) {
                         do {
                             final char c = viewData.readChar();
-                            if(!Character.isWhitespace(c)) return c;
+                            if(!isWhitespace(c)) return c;
                         } while((cursor += 2L) != limit);
                     } else {
                         do {
                             final char c = (char)viewData.read();
-                            if(!Character.isWhitespace(c)) return c;
+                            if(!isWhitespace(c)) return c;
                         } while(++cursor != limit);
                     }
                 } catch(final IOException e) {throw ioe(e);}
@@ -601,7 +621,10 @@ public class FileSequence implements Sequence {
                 try {
                     data.seek(cursor);
                     final char c = viewBig? data.readChar() : (char)data.read();
-                    return Character.isWhitespace(c)? iPNNWS(limit) : c;
+                    return isWhitespace(c)? iPNNWS(limit)
+                                          // The cast keeps the return value of iPNNWS from
+                                          // auto-unboxing, which allows it to return null.
+                                          : (Character)c;
                 } catch(final IOException e) {throw ioe(e);}
             }
             return null;
@@ -616,12 +639,12 @@ public class FileSequence implements Sequence {
                     if(viewBig) {
                         do {
                             final char c = viewData.readChar();
-                            if(!Character.isWhitespace(c)) return c;
+                            if(!isWhitespace(c)) return c;
                         } while((tmp += 2L) != limit);
                     } else {
                         do {
                             final char c = (char)viewData.read();
-                            if(!Character.isWhitespace(c)) return c;
+                            if(!isWhitespace(c)) return c;
                         } while(++tmp != limit);
                     }
                 } catch(final IOException e) {throw ioe(e);}
@@ -637,12 +660,12 @@ public class FileSequence implements Sequence {
                     if(viewBig) {
                         do {
                             final char c = viewData.readChar();
-                            if(!Character.isWhitespace(c)) return c;
+                            if(!isWhitespace(c)) return c;
                         } while((cursor += 2L) != limit);
                     } else {
                         do {
                             final char c = (char)viewData.read();
-                            if(!Character.isWhitespace(c)) return c;
+                            if(!isWhitespace(c)) return c;
                         } while(++cursor != limit);
                     }
                 } catch(final IOException e) {throw ioe(e);}
@@ -651,12 +674,13 @@ public class FileSequence implements Sequence {
         }
         
         @Override
-        public void mark(final long offset) throws IndexOutOfBoundsException {
+        public FFSI mark(final long offset) throws IndexOutOfBoundsException {
             if(oob(mark = offset(offset)) && mark != viewEnd)
                 throw new IndexOutOfBoundsException(
                     "Cannot mark index %d (range: [%d,%d],input: %d)."
                     .formatted(mark,viewStart,viewEnd,offset)
                 );
+            return this;
         }
         
         @Override protected long subBegin() {return mark;}
@@ -673,7 +697,7 @@ public class FileSequence implements Sequence {
         
         @Override protected void increment() {cursor -= scalar;}
         @Override protected long offset(final long i) {return cursor - i * scalar;}
-        @Override protected long skipidx(final long i) {return Math.max(i * scalar,viewStart) - scalar;}
+        @Override protected long skipidx(final long i) {return max(i,-1L) * scalar + viewStart;}
         
         @Override
         protected Character iSWS(final long limit) throws UncheckedIOException {
@@ -684,13 +708,13 @@ public class FileSequence implements Sequence {
                         do {
                             viewData.seek(cursor);
                             final char c = viewData.readChar();
-                            if(!Character.isWhitespace(c)) return c;
+                            if(!isWhitespace(c)) return c;
                         } while((cursor -= 2L) != limit);
                     } else {
                         do {
                             viewData.seek(cursor);
                             final char c = (char)viewData.read();
-                            if(!Character.isWhitespace(c)) return c;
+                            if(!isWhitespace(c)) return c;
                         } while(--cursor != limit);
                     }
                 } catch(final IOException e) {throw ioe(e);}
@@ -704,7 +728,10 @@ public class FileSequence implements Sequence {
                 try {
                     data.seek(cursor);
                     final char c = viewBig? data.readChar() : (char)data.read();
-                    return Character.isWhitespace(c)? iPNNWS(limit) : c;
+                    return isWhitespace(c)? iPNNWS(limit)
+                                          // The cast keeps the return value of iPNNWS from
+                                          // auto-unboxing, which allows it to return null.
+                                          : (Character)c;
                 } catch(final IOException e) {throw ioe(e);}
             }
             return null;
@@ -719,13 +746,13 @@ public class FileSequence implements Sequence {
                         do {
                             data.seek(tmp);
                             final char c = data.readChar();
-                            if(!Character.isWhitespace(c)) return c;
+                            if(!isWhitespace(c)) return c;
                         } while((tmp -= 2L) != limit);
                     } else {
                         do {
                             data.seek(tmp);
                             final char c = (char)data.read();
-                            if(!Character.isWhitespace(c)) return c;
+                            if(!isWhitespace(c)) return c;
                         } while(--tmp != limit);
                     }
                 } catch(final IOException e) {throw ioe(e);}
@@ -741,13 +768,13 @@ public class FileSequence implements Sequence {
                         do {
                             data.seek(cursor);
                             final char c = data.readChar();
-                            if(!Character.isWhitespace(c)) return c;
+                            if(!isWhitespace(c)) return c;
                         } while((cursor -= 2L) != limit);
                     } else {
                         do {
                             data.seek(cursor);
                             final char c = (char)data.read();
-                            if(!Character.isWhitespace(c)) return c;
+                            if(!isWhitespace(c)) return c;
                         } while(--cursor != limit);
                     }
                 } catch(final IOException e) {throw ioe(e);}
@@ -756,18 +783,19 @@ public class FileSequence implements Sequence {
         }
         
         @Override
-        public void mark(final long offset) throws IndexOutOfBoundsException {
+        public RFSI mark(final long offset) throws IndexOutOfBoundsException {
             if(oob(mark = offset(offset)) && mark != viewStart - scalar)
                 throw new IndexOutOfBoundsException(
                     "Cannot mark index %d (range: [%d,%d),input: %d)."
                     .formatted(mark + scalar,viewStart,viewEnd,offset)
                 );
+            return this;
         }
         
         @Override protected long subBegin() {return cursor + scalar;}
         @Override protected long subEnd() {return mark + scalar;}
         
-        @Override protected long strBegin() {return Math.max(viewStart,cursor - scalar * MAX_STRING_SIZE);}
+        @Override protected long strBegin() {return max(viewStart,cursor - scalar * MAX_STRING_SIZE);}
         @Override protected long strLength() {return cursor - viewStart + scalar;}
     }
     
@@ -790,7 +818,7 @@ public class FileSequence implements Sequence {
     
     @Override
     public String toString() throws UncheckedIOException {
-        try {return cs.stringDecode(MAX_STRING_SIZE,data);}
+        try {return cs.stringDecode((int)min(MAX_STRING_SIZE,size()),data,start / cs.size);}
         catch(final IOException e) {throw ioe(e);}
     }
 }

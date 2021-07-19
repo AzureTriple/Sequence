@@ -1,33 +1,74 @@
 package sequence;
 
+import static java.lang.Math.max;
+import static java.lang.Math.min;
 import static sequence.FileSequence.ioe;
 
 import java.util.NoSuchElementException;
 import java.util.function.Consumer;
 
 import java.io.UncheckedIOException;
-import util.NoIO;
-import util.NoIO.Suppresses;
 
+/**
+ * A {@linkplain Sequence} backed by an array containing other sequences.
+ * 
+ * @author AzureTriple
+ */
 public class CompoundSequence implements Sequence {
+    /**This is not declared in settings because it is for debug only.*/
+    private static final int MAX_STRING_SIZE = 8192;
+    
     protected Sequence[] data;
     /**Holds the total size of all sequences before and at each index.*/
     protected long[] subSizes;
-    protected long start,end;
     
-    protected CompoundSequence(final long start,final long end,final long[] subSizes,
-                               final Sequence[] data) {
-        this.start = start;
-        this.end = end;
+    protected CompoundSequence(final long[] subSizes,final Sequence[] data) {
         this.subSizes = subSizes;
         this.data = data;
     }
     
-    protected static class CompoundSequenceBuilder {
+    public static class CompoundSequenceBuilder {
+        private CompoundSequenceBuilder() {}
+        
         private Sequence[] data = null;
+        private Long start,end,length;
         
         public CompoundSequenceBuilder data(final Sequence...data) {
             this.data = data;
+            return this;
+        }
+        public CompoundSequenceBuilder start(final Long start) {
+            this.start = start;
+            return this;
+        }
+        public CompoundSequenceBuilder end(final Long end) {
+            this.end = end;
+            length = null;
+            return this;
+        }
+        public CompoundSequenceBuilder length(final Long length) {
+            this.length = length;
+            end = null;
+            return this;
+        }
+        /**
+         * @param start {@linkplain #start(Long)}
+         * @param end   {@linkplain #end(Long)}
+         */
+        public CompoundSequenceBuilder range(final Long start,final Long end) {
+            this.start = start;
+            this.end = end;
+            length = null;
+            return this;
+        }
+        /**
+         * @param offset  {@linkplain #start(Long)}
+         * @param length {@linkplain #length(Long)}
+         */
+        public CompoundSequenceBuilder offset(final Long offset,final Long length) {
+            start = offset;
+            this.length = length;
+            end = null;
             return this;
         }
         
@@ -36,7 +77,7 @@ public class CompoundSequence implements Sequence {
             if(data.length == 1) return data[0];
             // Remove null and empty sequences.
             int set = 0;
-            long end = 0;
+            long ts = 0;
             long[] sizes = new long[data.length];
             for(int i = 0;i < data.length;++i) {
                 if(data[i] != null && !data[i].isEmpty()) {
@@ -44,7 +85,7 @@ public class CompoundSequence implements Sequence {
                         data[set] = data[i] instanceof MutableSequence
                             ? ((MutableSequence)data[i]).immutableCopy()
                             : data[i];
-                    sizes[set] = end += data[set].size();
+                    sizes[set] = ts += data[set].size();
                     ++set;
                 }
             }
@@ -61,30 +102,62 @@ public class CompoundSequence implements Sequence {
                     sizes = tmp;
                 }
             }
-            return new CompoundSequence(0,end,sizes,data);
+            
+            if(start == null) start = 0L;
+            else if(ts < start || start < 0L && (start += ts) < 0L)
+                throw new IllegalArgumentException(
+                    "Invalid start index %d for array of length %d."
+                    .formatted(start,ts)
+                );
+            
+            if(end == null) {
+                if(length == null) end = ts;
+                else if(length < 0L || (end = length + start) > ts)
+                    throw new IllegalArgumentException(
+                        "Length %d is invalid."
+                        .formatted(length)
+                    );
+            } else {
+                if(ts < end || end < 0 && (end += ts) < 0L)
+                    throw new IllegalArgumentException(
+                        "Invalid end index %d for array of length %d."
+                        .formatted(end,ts)
+                    );
+                if(end - start < 0L)
+                    throw new IllegalArgumentException(
+                        "Invalid range: [%d,%d)"
+                        .formatted(start,end)
+                    );
+            }
+            return internalSS(data,sizes,start,end);
         }
+    }
+    public static CompoundSequenceBuilder builder() {return new CompoundSequenceBuilder();}
+    
+    @Override
+    public boolean equals(final Object obj) {
+        return obj == this || obj instanceof CharSequence && compareTo((CharSequence)obj) == 0;
     }
     
     @Override public int length() {return (int)size();}
-    @Override public long size() {return end - start;}
+    @Override public long size() {return subSizes[subSizes.length - 1];}
     
     /**
      * @param idx   The index of the desired character. Negative values indicate an
      *              offset from the end instead of the start.
-     * @param start The index of the first character (inclusive).
-     * @param end   The index of the last character (exclusive).
+     * @param length   The index of the last character (exclusive).
      * 
      * @return The adjusted index.
      * 
-     * @throws IndexOutOfBoundsException <code>|idx| &ge; (end - start)</code>
+     * @throws IndexOutOfBoundsException <code>|idx| &ge; length</code>
      */
-    protected static long idx(final long idx,final long start,final long end)
+    protected static long idx(final long idx,final long length)
                               throws IndexOutOfBoundsException {
-        final long out = idx + (idx < 0L? end : start);
-        if(end <= out || out < start)
+        final long out = idx + (idx < 0L? length : 0L);
+        if(length <= out || out < 0L)
             throw new IndexOutOfBoundsException(
-                "%d is outside the range [%d,%d) (shifted: %d,[0,%d))."
-                .formatted(idx,start,end,out - start,end - start)
+                "%d is outside the range [0,%d) (shifted: %d,[0,%d))."
+                .formatted(idx,length,out,length)
             );
         return out;
     }
@@ -92,15 +165,16 @@ public class CompoundSequence implements Sequence {
      * @param idx The index of the desired character. Negative values indicate an
      *            offset from the end instead of the start.
      * 
-     * @return The index of the byte in the file.
+     * @return The adjusted index.
      * 
      * @throws IndexOutOfBoundsException <code>|idx| &ge; size()</code>
      */
-    protected long idx(final long idx) throws IndexOutOfBoundsException {return idx(idx,start,end);}
+    protected long idx(final long idx) throws IndexOutOfBoundsException {return idx(idx,size());}
     
     /**
      * @return The index of the segment which contains the character at the
-     *         specified index.
+     *         specified index. The returned index is always in the range
+     *         <code>[0,subSizes.length)</code>.
      */
     protected static int segment(final long idx,final long[] subSizes) {
         // Binary search
@@ -113,11 +187,12 @@ public class CompoundSequence implements Sequence {
                 j -= k;
             } else j += k;
         } while(i > 0);
-        return j;
+        return min(subSizes.length - 1,j);
     }
     /**
      * @return The index of the segment which contains the character at the
-     *         specified index.
+     *         specified index. The returned index is always in the range
+     *         <code>[0,subSizes.length)</code>.
      */
     protected int segment(final long idx) {return segment(idx,subSizes);}
     /**@return The character index set relative to the specified segment.*/
@@ -137,49 +212,77 @@ public class CompoundSequence implements Sequence {
     }
     
     /**
-     * Same as {@linkplain #idx(long,long,long)}, except <code>end</code> is
+     * Same as {@linkplain #idx(long,long)}, except <code>length</code> is
      * included in the range of valid indices.
      */
-    protected static long ssidx(final long idx,final long start,final long end)
+    protected static long ssidx(final long idx,final long length)
                                 throws IndexOutOfBoundsException {
-        final long out = idx + (idx < 0L? end : start);
-        if(end < out || out < start)
+        final long out = idx + (idx < 0L? length : 0L);
+        if(length < out || out < 0L)
             throw new IndexOutOfBoundsException(
-                "%d is outside the range [%d,%d] (shifted: %d,[0,%d])."
-                .formatted(idx,start,end,out - start,end - start)
+                "%d is outside the range [0,%d] (shifted: %d,[0,%d])."
+                .formatted(idx,length,out,length)
             );
         return out;
     }
     /**
-     * Same as {@linkplain #idx(long)}, except <code>end</code> is included in the
+     * Same as {@linkplain #idx(long)}, except <code>length</code> is included in the
      * range of valid indices.
      */
-    protected long ssidx(final long idx) throws IndexOutOfBoundsException {return ssidx(idx,start,end);}
-    @NoIO(suppresses = Suppresses.EXCEPTIONS) @Override
-    public CompoundSequence subSequence(long start,long end) throws IndexOutOfBoundsException {
+    protected long ssidx(final long idx) throws IndexOutOfBoundsException {return ssidx(idx,size());}
+    protected static Sequence internalSS(final Sequence[] data,final long[] subSizes,
+                                         final long start,final long end)
+                                         throws UncheckedIOException {
+        if(start == end) return EMPTY;
+        final int first = segment(start,subSizes),last = segment(end - 1,subSizes);
+        final long r0 = relative(start,first,subSizes),r1 = relative(end,last,subSizes);
+        if(first == last) return data[first].subSequence(r0,r1);
+        
+        final Sequence[] ndata = new Sequence[last - first + 1];
+        ndata[0] = data[first].subSequence(r0,data[first].size());
+        System.arraycopy(data,first + 1,ndata,1,last - first - 1);
+        ndata[ndata.length - 1] = data[last].subSequence(0L,r1);
+        
+        final long[] nss = new long[ndata.length];
+        {
+            final long diff = r0 + (first == 0? 0L : subSizes[first - 1]);
+            if(diff == 0L)
+                System.arraycopy(subSizes,0,nss,0,nss.length);
+            else
+                for(int i = 0,j = first;i < nss.length;++i,++j)
+                    nss[i] = subSizes[j] - diff;
+        }
+        nss[nss.length - 1] -= data[last].size() - r1;
+        
+        return new CompoundSequence(nss,ndata);
+    }
+    @Override
+    public Sequence subSequence(long start,long end) throws IndexOutOfBoundsException,
+                                                            UncheckedIOException {
         if((end = ssidx(end)) < (start = ssidx(start)))
             throw new IndexOutOfBoundsException(
                 "Range [%d,%d) is invalid."
                 .formatted(end,start)
             );
-        return new CompoundSequence(start,end,subSizes,data);
+        return internalSS(data,subSizes,start,end);
     }
-    @NoIO(suppresses = Suppresses.EXCEPTIONS) @Override
-    public CompoundSequence subSequence(final int start,final int end) throws IndexOutOfBoundsException {
+    @Override
+    public Sequence subSequence(final int start,final int end) throws IndexOutOfBoundsException,
+                                                                      UncheckedIOException {
         return subSequence((long)start,(long)end);
     }
     
     /**Simple Compound Sequence Iterator*/
     protected class SCSI implements SimpleSequenceIterator {
         protected int segment;
-        protected final long viewEnd = end;
-        protected long cursor = start;
+        protected final long viewEnd = size();
+        protected long cursor = 0L;
         protected final Sequence[] viewData = data;
         protected final long[] viewSubSizes = subSizes;
         protected SimpleSequenceIterator itr;
         
         protected SCSI() throws UncheckedIOException {
-            if(cursor != viewEnd) itr = null;
+            if(cursor == viewEnd) itr = null;
             else {
                 segment = segment(cursor,viewSubSizes);
                 itr = viewData[segment].iterator();
@@ -209,7 +312,14 @@ public class CompoundSequence implements Sequence {
             } else itr.skip(count);
             return this;
         }
-        @Override public boolean hasNext() {return cursor < viewEnd;}
+        @Override
+        public boolean hasNext() throws UncheckedIOException {
+            if(itr != null) {
+                if(cursor != viewEnd) return true;
+                close();
+            }
+            return false;
+        }
         @Override
         public Character next() throws NoSuchElementException,UncheckedIOException {
             if(!hasNext()) throw new NoSuchElementException();
@@ -234,7 +344,11 @@ public class CompoundSequence implements Sequence {
                 }
             }
         }
-        @Override public void close() throws UncheckedIOException {if(itr != null) itr.close();}
+        @Override
+        public void close() throws UncheckedIOException {
+            cursor = viewEnd;
+            if(itr != null) {itr.close(); itr = null;}
+        }
     }
     @Override public SimpleSequenceIterator iterator() throws UncheckedIOException {return new SCSI();}
     
@@ -245,7 +359,7 @@ public class CompoundSequence implements Sequence {
     protected abstract class CSI implements SequenceIterator {
         protected final Sequence[] viewData = data;
         protected final long[] viewSubSizes = subSizes;
-        protected final long viewStart = start,viewEnd = end,lastIdx;
+        protected final long viewEnd = size(),lastIdx;
         protected SequenceIterator itr;
         protected long cursor,mark;
         protected int segment;
@@ -253,7 +367,7 @@ public class CompoundSequence implements Sequence {
         protected abstract void increment() throws UncheckedIOException;
         protected abstract SequenceIterator getItr(final Sequence segment) throws UncheckedIOException;
         protected abstract long offset(long i);
-        protected boolean oob(final long i) {return viewEnd <= i || i < viewStart;}
+        protected boolean oob(final long i) {return viewEnd <= i || i < 0L;}
         protected abstract long skipidx(long i);
         
         protected CSI(final long begin,final long end) throws UncheckedIOException {
@@ -261,7 +375,7 @@ public class CompoundSequence implements Sequence {
             lastIdx = end;
         }
         
-        @Override public long index() {return cursor - viewStart;}
+        @Override public long index() {return cursor;}
         @Override public CompoundSequence getParent() {return CompoundSequence.this;}
         
         @Override
@@ -334,58 +448,83 @@ public class CompoundSequence implements Sequence {
             return iNNWS(skipidx(limit));
         }
         
-        @Override public void mark() throws IndexOutOfBoundsException {mark(0L);}
-        @Override public void mark(final int offset) throws IndexOutOfBoundsException {mark((long)offset);}
+        @Override public CSI mark() throws IndexOutOfBoundsException {return mark(0L);}
+        @Override public CSI mark(final int offset) throws IndexOutOfBoundsException {return mark((long)offset);}
+        @Override public abstract CSI mark(long offset) throws IndexOutOfBoundsException;
         
         /* IMPORTANT: The jump methods should NEVER send the cursor to an out-of-bounds position. */
+        protected void jumpBase(final long nc) throws UncheckedIOException {
+            {
+                final int ns = segment(cursor = nc,viewSubSizes);
+                if(ns != segment) {
+                    if(itr != null) itr.close();
+                    itr = getItr(viewData[segment = ns]);
+                }
+            }
+            // (itr == null) == (segment == viewData.length)
+            // 'ns' is in [0,viewData.length)
+            // Therefore, (itr == null) == (ns != segment)
+            // 'itr' is never null here. Q.E.D.
+            itr.jumpTo(relative(cursor,segment,viewSubSizes));
+        }
         @Override
-        public CSI jumpTo(final int index) throws IndexOutOfBoundsException {
+        public CSI jumpTo(final int index) throws IndexOutOfBoundsException,
+                                                  UncheckedIOException {
             return jumpTo((long)index);
         }
         @Override
-        public CSI jumpTo(final long index) throws IndexOutOfBoundsException {
-            cursor = CompoundSequence.idx(index,viewStart,viewEnd);
+        public CSI jumpTo(final long index) throws IndexOutOfBoundsException,
+                                                   UncheckedIOException {
+            final long nc = CompoundSequence.idx(index,viewEnd);
+            if(nc != cursor) jumpBase(nc);
             return this;
         }
         @Override
-        public CSI jumpOffset(final int offset) throws IndexOutOfBoundsException {
+        public CSI jumpOffset(final int offset) throws IndexOutOfBoundsException,
+                                                       UncheckedIOException {
             return jumpOffset((long)offset);
         }
         @Override
-        public CSI jumpOffset(final long offset) throws IndexOutOfBoundsException {
+        public CSI jumpOffset(final long offset) throws IndexOutOfBoundsException,
+                                                        UncheckedIOException {
             final long nc = offset(offset);
-            if(oob(nc))
-                throw new IndexOutOfBoundsException(
-                    "Cannot jump to index %d (range: [%d,%d),input: %d)."
-                    .formatted(nc,viewStart,viewEnd,offset)
-                );
-            cursor = nc;
+            if(nc != cursor) {
+                if(oob(nc))
+                    throw new IndexOutOfBoundsException(
+                        "Cannot jump to index %d (range: [0,%d),input: %d)."
+                        .formatted(nc,viewEnd,offset)
+                    );
+                jumpBase(nc);
+            }
             return this;
         }
         
         protected abstract long subBegin();
         protected abstract long subEnd();
         @Override
-        public CompoundSequence subSequence() throws UncheckedIOException {
+        public Sequence subSequence() throws UncheckedIOException {
             final long a = subBegin(),b = subEnd();
             if(b < a)
                 throw new IndexOutOfBoundsException(
                     "Range [%d,%d) is invalid."
                     .formatted(a,b)
                 );
-            return new CompoundSequence(a,b,viewSubSizes,viewData);
+            return internalSS(viewData,viewSubSizes,a,b);
         }
         
-        // The easy way out.
-        @Override public String toString() throws UncheckedIOException {return itr != null? itr.toString() : "";}
+        protected abstract String fullStrings(String current) throws UncheckedIOException;
+        @Override
+        public String toString() throws UncheckedIOException {
+            return itr != null? fullStrings(itr.toString()) : "";
+        }
         
         @Override public void close() throws UncheckedIOException {if(itr != null) itr.close();}
     }
     /**Forward Compound Sequence Iterator*/
     protected class FCSI extends CSI {
-        protected FCSI() throws UncheckedIOException {super(start,end);}
+        protected FCSI() throws UncheckedIOException {super(0L,size());}
         
-        @Override public long offset() {return cursor - viewStart;}
+        @Override public long offset() {return cursor;}
         
         @Override
         protected void increment() throws UncheckedIOException {
@@ -402,12 +541,18 @@ public class CompoundSequence implements Sequence {
             return segment.forwardIterator();
         }
         @Override protected long offset(final long i) {return cursor + i;}
-        @Override protected long skipidx(final long i) {return Math.min(i,viewStart);}
+        @Override protected long skipidx(final long i) {return min(i,viewEnd);}
         
         protected Character iSWSBase(final long limit) throws UncheckedIOException {
+            // limit <= viewEnd (capped by skipidx)
+            // cursor < limit (calling condition)
+            // -> cursor < viewEnd
+            // Methods which modify the cursor are sync'd w/ the segment index
+            // -> segment < viewData.length
+            // itr != null Q.E.D.
+            
             // Subtract the iterator's offset so that the loop always adds
             // the number of skipped characters to the cursor.
-            // itr should never be null.
             cursor -= itr.offset();
             do {
                 // The limit relative to the iterator's starting position
@@ -416,7 +561,7 @@ public class CompoundSequence implements Sequence {
                 // segment's start.
                 final Character c = itr.skipWS(limit - cursor);
                 // Add the number of characters skipped.
-                cursor += itr.offset();
+                cursor += itr.getParent().size();
                 // Check exit conditions.
                 if(c != null || cursor == limit) return c;
                 // Move on to the next segment, if any.
@@ -445,17 +590,25 @@ public class CompoundSequence implements Sequence {
         protected Character iPNWS(long limit) throws UncheckedIOException {
             // This method trusts that the cursor never underflows via jump.
             if(cursor < limit) {
+                // limit <= viewEnd (capped by skipidx)
+                // cursor < limit (above condition)
+                // -> cursor < viewEnd
+                // Methods which modify the cursor are sync'd w/ the segment index
+                // -> segment < viewData.length
+                // itr != null Q.E.D.
+                
                 // (cursor - idx) is the absolute position of the current segment's
                 // starting index. Subtracting this value from the limit yields the
                 // limit relative to the current segment.
-                // itr should never be null.
                 final long idx = itr.offset();
                 final Character c = itr.peekNonWS(limit -= cursor - idx);
                 // (itr.getParent().size() - idx) is the number of characters
                 // skipped if no non-whitespace was found. Subtracting from the
                 // limit yields the limit relative to the next segment.
                 return c == null? iPNWSBase(limit - itr.getParent().size() + idx)
-                                : c;
+                                // The cast keeps the return value of iPNWS from
+                                // auto-unboxing, which allows it to return null.
+                                : (Character)c;
             }
             return null;
         }
@@ -463,23 +616,43 @@ public class CompoundSequence implements Sequence {
         protected Character iPNNWS(long limit) throws UncheckedIOException {
             // This method trusts that the cursor never underflows via jump.
             if(cursor + 1L < limit) {
+                // limit <= viewEnd (capped by skipidx)
+                // cursor + 1 < limit (calling condition)
+                // -> cursor < limit - 1
+                // -> cursor < viewEnd - 1
+                // -> cursor < viewEnd
+                // Methods which modify the cursor are sync'd w/ the segment index
+                // -> segment < viewData.length
+                // itr != null Q.E.D.
+                
                 // (cursor - idx) is the absolute position of the current segment's
                 // starting index. Subtracting this value from the limit yields the
                 // limit relative to the current segment.
-                // itr should never be null.
                 final long idx = itr.offset();
                 final Character c = itr.peekNextNonWS(limit -= cursor - idx);
                 // (itr.getParent().size() - idx) is the number of characters
                 // skipped if no non-whitespace was found. Subtracting from the
                 // limit yields the limit relative to the next segment.
                 return c == null? iPNWSBase(limit - itr.getParent().size() + idx)
-                                : c;
+                                // The cast keeps the return value of iPNWS from
+                                // auto-unboxing, which allows it to return null.
+                                : (Character)c;
             }
             return null;
         }
         @Override
         protected Character iNNWS(long limit) throws UncheckedIOException {
+            // This method trusts that the cursor never underflows via jump.
             if(cursor + 1L < limit) {
+                // limit <= viewEnd (capped by skipidx)
+                // cursor + 1 < limit (calling condition)
+                // -> cursor < limit - 1
+                // -> cursor < viewEnd - 1
+                // -> cursor < viewEnd
+                // Methods which modify the cursor are sync'd w/ the segment index
+                // -> segment < viewData.length
+                // itr != null Q.E.D.
+                itr.next();
                 increment();
                 return iSWSBase(limit);
             }
@@ -487,19 +660,33 @@ public class CompoundSequence implements Sequence {
         }
         
         @Override
-        public void mark(final long offset) throws IndexOutOfBoundsException {
+        public FCSI mark(final long offset) throws IndexOutOfBoundsException {
             if(oob(mark = offset(offset)) && mark != viewEnd)
                 throw new IndexOutOfBoundsException(
-                    "Cannot mark index %d (range: [%d,%d],input: %d)."
-                    .formatted(mark,viewStart,viewEnd,offset)
+                    "Cannot mark index %d (range: [0,%d],input: %d)."
+                    .formatted(mark,viewEnd,offset)
                 );
+            return this;
         }
         
         @Override protected long subBegin() {return mark;}
         @Override protected long subEnd() {return cursor;}
+        
+        @Override
+        protected String fullStrings(final String current) throws UncheckedIOException {
+            final StringBuilder out = new StringBuilder(current);
+            // Get the index of the last segment, accounting for max string size.
+            final int last = segment(MAX_STRING_SIZE,viewSubSizes);
+            for(int i = segment;++i < last;) out.append(viewData[i]);
+            final long diff = MAX_STRING_SIZE - out.length();
+            return out.append(
+                diff < viewData[last].size()? viewData[last].subSequence(0L,diff)
+                                            : viewData[last]
+            ).toString();
+        }
     }
-    protected class RCSI extends CSI { 
-        protected RCSI() throws UncheckedIOException {super(end - 1L,start - 1L);}
+    protected class RCSI extends CSI {
+        protected RCSI() throws UncheckedIOException {super(size() - 1L,-1L);}
         
         @Override public long offset() {return viewEnd - 1L - cursor;}
         
@@ -517,21 +704,28 @@ public class CompoundSequence implements Sequence {
             return segment.reverseIterator();
         }
         @Override protected long offset(final long i) {return cursor - i;}
-        @Override protected long skipidx(final long i) {return Math.max(i,viewStart) - 1L;}
+        @Override protected long skipidx(final long i) {return max(i,-1L);}
         
         protected Character iSWSBase(final long limit) throws UncheckedIOException {
+            // limit >= -1 (capped by skipidx)
+            // cursor > limit (calling condition)
+            // -> cursor > -1
+            // Methods which modify the cursor are sync'd w/ the segment index
+            // -> segment > -1
+            // itr != null Q.E.D.
+            
             // Add the iterator's offset so that the loop always subtracts 
             // the number of skipped characters from the cursor.
-            // itr should never be null.
             cursor += itr.offset();
             do {
                 // The limit relative to the iterator's ending position is
                 // the same as the limit relative to the sequence's start,
                 // since the cursor is always at the absolute position of
                 // this segment's end.
-                final Character c = itr.skipWS(limit - cursor + itr.getParent().size());
+                final long ps = itr.getParent().size();
+                final Character c = itr.skipWS(limit - cursor + ps - 1);
                 // Subtract the number of characters skipped.
-                cursor -= itr.offset();
+                cursor -= ps;
                 // Check exit conditions.
                 if(c != null || cursor == limit) return c;
                 // Move on to the next segment, if any.
@@ -544,7 +738,6 @@ public class CompoundSequence implements Sequence {
             // This method trusts that the cursor never underflows via jump.
             return cursor > limit? iSWSBase(limit) : null;
         }
-        //TODO convert to reverse
         protected Character iPNWSBase(final long limit,long vcursor) throws UncheckedIOException {
             // Iterate through all other segments.
             for(int s = segment - 1;s > 0;--s) {
@@ -561,14 +754,22 @@ public class CompoundSequence implements Sequence {
         protected Character iPNWS(final long limit) throws UncheckedIOException {
             // This method trusts that the cursor never underflows via jump.
             if(cursor > limit) {
+                // limit >= -1 (capped by skipidx)
+                // cursor > limit (above condition)
+                // -> cursor > -1
+                // Methods which modify the cursor are sync'd w/ the segment index
+                // -> segment > -1
+                // itr != null Q.E.D.
+                
                 // (cursor - itr.index()) is the absolute position of the current
                 // segment's starting index. Subtracting this value from the limit
                 // yields the limit relative to the current segment.
-                // itr should never be null.
                 final long idx = cursor - itr.index();
                 final Character c = itr.peekNonWS(limit - idx);
                 return c == null? iPNWSBase(limit,idx)
-                                : c;
+                                // The cast keeps the return value of iPNWS from
+                                // auto-unboxing, which allows it to return null.
+                                : (Character)c;
             }
             return null;
         }
@@ -576,20 +777,40 @@ public class CompoundSequence implements Sequence {
         protected Character iPNNWS(final long limit) throws UncheckedIOException {
             // This method trusts that the cursor never underflows via jump.
             if(cursor - 1L > limit) {
+                // limit >= -1 (capped by skipidx)
+                // cursor - 1 > limit (above condition)
+                // -> cursor > limit + 1
+                // -> cursor > 0
+                // -> cursor > -1
+                // Methods which modify the cursor are sync'd w/ the segment index
+                // -> segment > -1
+                // itr != null Q.E.D.
+                
                 // (cursor - itr.index()) is the absolute position of the current
                 // segment's starting index. Subtracting this value from the limit
                 // yields the limit relative to the current segment.
-                // itr should never be null.
                 final long idx = cursor - itr.index();
                 final Character c = itr.peekNextNonWS(limit - idx);
                 return c == null? iPNWSBase(limit,idx)
-                                : c;
+                                // The cast keeps the return value of iPNWS from
+                                // auto-unboxing, which allows it to return null.
+                                : (Character)c;
             }
             return null;
         }
         @Override
         protected Character iNNWS(long limit) throws UncheckedIOException {
+            // This method trusts that the cursor never underflows via jump.
             if(cursor - 1L > limit) {
+                // limit >= -1 (capped by skipidx)
+                // cursor - 1 > limit (above condition)
+                // -> cursor > limit + 1
+                // -> cursor > 0
+                // -> cursor > -1
+                // Methods which modify the cursor are sync'd w/ the segment index
+                // -> segment > -1
+                // itr != null Q.E.D.
+                itr.next();
                 increment();
                 return iSWSBase(limit);
             }
@@ -597,28 +818,51 @@ public class CompoundSequence implements Sequence {
         }
         
         @Override
-        public void mark(final long offset) throws IndexOutOfBoundsException {
-            if(oob(mark = offset(offset)) && mark != viewStart - 1L)
+        public RCSI mark(final long offset) throws IndexOutOfBoundsException {
+            if(oob(mark = offset(offset)) && mark != -1L)
                 throw new IndexOutOfBoundsException(
-                    "Cannot mark index %d (range: [%d,%d],input: %d)."
-                    .formatted(mark + 1L,viewStart,viewEnd,offset)
+                    "Cannot mark index %d (range: [0,%d],input: %d)."
+                    .formatted(mark + 1L,viewEnd,offset)
                 );
+            return this;
         }
         
         @Override protected long subBegin() {return cursor + 1L;}
         @Override protected long subEnd() {return mark + 1L;}
+        
+        @Override
+        protected String fullStrings(final String current) throws UncheckedIOException {
+            final int first;
+            final StringBuilder out;
+            {
+                final long diff = viewSubSizes[segment - 1] - MAX_STRING_SIZE + current.length();
+                first = segment != 0? 1 + segment(diff,viewSubSizes)
+                                              : 1;
+                out = new StringBuilder(
+                    diff > 0L? viewData[first - 1].subSequence(
+                                   relative(
+                                       diff,
+                                       first - 1,
+                                       viewSubSizes
+                                   ),
+                                   viewData[first - 1].size()
+                               )
+                             : viewData[first - 1]
+                );
+            }
+            for(int i = first;i < segment;++i) out.append(viewData[i]);
+            return out.append(current).toString();
+        }
     }
     
     @Override
     public SequenceIterator forwardIterator() throws UncheckedIOException {
         return isEmpty()? EMPTY.forwardIterator() : new FCSI();
     }
-    
     @Override
     public SequenceIterator reverseIterator() throws UncheckedIOException {
         return isEmpty()? EMPTY.reverseIterator() : new RCSI();
     }
-    
     
     /**
      * @see sequence.Sequence#close()
@@ -636,29 +880,17 @@ public class CompoundSequence implements Sequence {
         }
         if(except != null) throw except;
     }
+    
+    @Override
+    public String toString() {
+        final StringBuilder out = new StringBuilder();
+        // Get the index of the last segment, accounting for max string size.
+        final int last = segment(MAX_STRING_SIZE,subSizes);
+        for(int i = 0;i < last;++i) out.append(data[i]);
+        final long diff = MAX_STRING_SIZE - out.length();
+        return out.append(
+            diff < data[last].size()? data[last].subSequence(0L,diff)
+                                    : data[last]
+        ).toString();
+    }
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
