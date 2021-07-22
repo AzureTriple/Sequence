@@ -13,7 +13,10 @@ import util.NoIO;
  * 
  * @author AzureTriple
  */
-public interface Sequence extends CharSequence,Comparable<CharSequence>,Iterable<Character>,AutoCloseable {
+public interface Sequence extends CharSequence,
+                                  Comparable<CharSequence>,
+                                  Iterable<Character>,
+                                  AutoCloseable {
     /**
      * An iterator which traverses the characters in a {@linkplain Sequence}.
      * <p>
@@ -383,24 +386,48 @@ public interface Sequence extends CharSequence,Comparable<CharSequence>,Iterable
     @Override String toString() throws UncheckedIOException;
     @Override void close() throws UncheckedIOException;
     
+    /**Copies this sequence to the specified character array.*/
+    Sequence copyTo(char[] arr,int offset) throws IllegalArgumentException,
+                                                  IndexOutOfBoundsException,
+                                                  UncheckedIOException;
+    /**Creates a mutable copy of this sequence as a {@linkplain MutableSequence}.*/
+    MutableSequence mutableCopy() throws UncheckedIOException;
+    /**Creates an immutable copy of this sequence.*/
+    Sequence immutableCopy() throws UncheckedIOException;
+    
     /**A shared instance of an empty sequence.*/
-    Sequence EMPTY = new Sequence() {
+    MutableSequence EMPTY = new MutableSequence() { //TODO make behavior more standard
         @Override
         public boolean equals(final Object obj) {
             return obj == this || obj instanceof CharSequence && ((CharSequence)obj).isEmpty();
         }
-        @NoIO @Override public Sequence subSequence(int start,int end) {return EMPTY;}
-        @NoIO @Override public Sequence subSequence(long start,long end) {return EMPTY;}
+        @NoIO @Override public MutableSequence subSequence(int start,int end) {return this;}
+        @NoIO @Override public MutableSequence subSequence(long start,long end) {return this;}
+        @NoIO @Override
+        public MutableSequence mutableSubSequence(int start,int end) {
+            return this;
+        }
+        @NoIO @Override
+        public MutableSequence mutableSubSequence(long start,long end) {
+            return this;
+        }
         @Override public int length() {return 0;}
         @NoIO @Override public char charAt(int index) {return 0;}
         @NoIO @Override public char charAt(long index) {return 0;}
         
+        @NoIO @Override public MutableSequence set(int index,char c) {return this;}
+        @NoIO @Override public MutableSequence set(long index,char c) {return this;}
+        @NoIO @Override public MutableSequence set(int index,char[] c) {return this;}
+        @NoIO @Override public MutableSequence set(long index,char[] c) {return this;}
+        @NoIO @Override public MutableSequence set(int index,CharSequence c) {return this;}
+        @NoIO @Override public MutableSequence set(long index,CharSequence c) {return this;}
+        
         @NoIO
-        final class EMPTYITR implements SequenceIterator,SimpleSequenceIterator {
+        final class EMPTYITR implements MutableSequenceIterator,SimpleSequenceIterator {
             @NoIO @Override public SimpleSequenceIterator skip(long count) {return this;}
             @Override public long index() {return 0L;}
             @Override public long offset() {return 0L;}
-            @Override public Sequence getParent() {return EMPTY;}
+            @Override public MutableSequence getParent() {return (MutableSequence)EMPTY;}
             
             @NoIO @Override public Character peek() {return null;}
             @NoIO @Override public Character peek(int offset) {return null;}
@@ -426,7 +453,11 @@ public interface Sequence extends CharSequence,Comparable<CharSequence>,Iterable
             @Override public EMPTYITR mark(int offset) {return this;}
             @Override public EMPTYITR mark(long offset) {return this;}
             
-            @NoIO @Override public Sequence subSequence() {return EMPTY;}
+            @NoIO @Override public MutableSequenceIterator set(char c) {return this;}
+            @NoIO @Override public MutableSequenceIterator set(int idx,char c) {return this;}
+            @NoIO @Override public MutableSequenceIterator set(long idx,char c) {return this;}
+            
+            @NoIO @Override public MutableSequence subSequence() {return (MutableSequence)EMPTY;}
             
             @NoIO @Override public EMPTYITR jumpTo(int index) {return this;}
             @NoIO @Override public EMPTYITR jumpTo(long index) {return this;}
@@ -434,13 +465,26 @@ public interface Sequence extends CharSequence,Comparable<CharSequence>,Iterable
             @NoIO @Override public EMPTYITR jumpOffset(long offset) {return this;}
             
             @NoIO @Override public void forEachRemaining(Consumer<? super Character> action) {}
-            @NoIO @Override public void close() {};
+            @NoIO @Override public void close() {}
         }
         @NoIO @Override public SimpleSequenceIterator iterator() {return new EMPTYITR();}
-        @NoIO @Override public SequenceIterator forwardIterator() {return new EMPTYITR();}
-        @NoIO @Override public SequenceIterator reverseIterator() {return new EMPTYITR();}
+        @NoIO @Override public MutableSequenceIterator forwardIterator() {return new EMPTYITR();}
+        @NoIO @Override public MutableSequenceIterator reverseIterator() {return new EMPTYITR();}
         
         @NoIO @Override public void close() {}
         @NoIO @Override public String toString() {return "";}
+        
+        @NoIO @Override public MutableSequence copyTo(char[] arr,int offset) {return this;}
+        
+        @NoIO @Override public MutableSequence mutableCopy() {return this;}
+        @NoIO @Override public Sequence immutableCopy() {return this;}
     };
+    
+    static ArraySequenceBuilder arraySequenceBuilder() {return new ArraySequenceBuilder();}
+    static FileSequenceBuilder fileSequenceBuilder() {return new FileSequenceBuilder();}
+    static CompoundSequenceBuilder compoundSequenceBuilder() {return new CompoundSequenceBuilder();}
+    
+    static MutableArraySequenceBuilder mutableArraySequenceBuilder() {return new MutableArraySequenceBuilder();}
+    static MutableFileSequenceBuilder mutableFileSequenceBuilder() {return new MutableFileSequenceBuilder();}
+    static MutableCompoundSequenceBuilder mutableCompoundSequenceBuilder() {return new MutableCompoundSequenceBuilder();}
 }

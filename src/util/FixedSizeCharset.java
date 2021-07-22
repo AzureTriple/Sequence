@@ -569,6 +569,15 @@ public final class FixedSizeCharset extends Charset {
     }
     
     /**
+     * Copies characters encoded by the specified charset from the source file and
+     * writes them using the specified {@linkplain FixedSizeCharset}.
+     */
+    public static void transfer(final File src,final Charset scs,
+                                final File dst,final FixedSizeCharset dcs)
+                                throws IOException {
+        transferCoded(src,scs.newDecoder(),dst,dcs.newEncoder());
+    }
+    /**
      * Submits a data transfer task to the executor. If an exception is raised
      * during execution, the executor will be shut down immediately and the returned
      * future object will raise an exception when the get method is called.
