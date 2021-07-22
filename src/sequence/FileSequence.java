@@ -34,9 +34,6 @@ import util.NoIO.Suppresses;
  * @implNote Objects of this type may leak resources if not closed.
  */
 class FileSequence implements Sequence {
-    /**This is not declared in settings because it is for debug only.*/
-    static final int MAX_STRING_SIZE = 8192;
-    
     static final File TMP_DIR;
     static {
         // Create temporary directories
@@ -440,7 +437,7 @@ class FileSequence implements Sequence {
         public String toString() throws UncheckedIOException {
             try{
                 return cs.stringDecode(
-                    (int)min(strLength() / scalar,MAX_STRING_SIZE),
+                    (int)min(strLength() / scalar,Integer.MAX_VALUE),
                     data,
                     strBegin() / scalar
                 );
@@ -669,7 +666,7 @@ class FileSequence implements Sequence {
         @Override long subBegin() {return cursor + scalar;}
         @Override long subEnd() {return mark + scalar;}
         
-        @Override long strBegin() {return max(start,cursor - scalar * MAX_STRING_SIZE);}
+        @Override long strBegin() {return max(start,cursor - scalar * Integer.MAX_VALUE);}
         @Override long strLength() {return cursor - start + scalar;}
     }
     
@@ -692,7 +689,7 @@ class FileSequence implements Sequence {
     
     @Override
     public String toString() throws UncheckedIOException {
-        try {return cs.stringDecode((int)min(MAX_STRING_SIZE,size()),data,start);}
+        try {return cs.stringDecode((int)min(Integer.MAX_VALUE,size()),data,start);}
         catch(final IOException e) {throw ioe(e);}
     }
     

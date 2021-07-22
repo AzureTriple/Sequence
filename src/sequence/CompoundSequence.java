@@ -17,8 +17,6 @@ import util.NoIO.Suppresses;
  * @author AzureTriple
  */
 class CompoundSequence implements Sequence {
-    /**This is not declared in settings because it is for debug only.*/
-    private static final int MAX_STRING_SIZE = 8192;
     static final CSConstructor CONSTRUCTOR = (s,d) -> new CompoundSequence(s,d);
     
     Sequence[] data;
@@ -630,9 +628,9 @@ class CompoundSequence implements Sequence {
         String fullStrings(final String current) throws UncheckedIOException {
             final StringBuilder out = new StringBuilder(current);
             // Get the index of the last segment, accounting for max string size.
-            final int last = segment(MAX_STRING_SIZE,subSizes);
+            final int last = segment(Integer.MAX_VALUE,subSizes);
             for(int i = segment;++i < last;) out.append(data[i]);
-            final long diff = MAX_STRING_SIZE - out.length();
+            final long diff = Integer.MAX_VALUE - out.length();
             return out.append(
                 diff < data[last].size()? data[last].subSequence(0L,diff)
                                         : data[last]
@@ -792,7 +790,7 @@ class CompoundSequence implements Sequence {
             final int first;
             final StringBuilder out;
             {
-                final long diff = subSizes[segment - 1] - MAX_STRING_SIZE + current.length();
+                final long diff = subSizes[segment - 1] - Integer.MAX_VALUE + current.length();
                 first = segment != 0? 1 + segment(diff,subSizes)
                                               : 1;
                 out = new StringBuilder(
@@ -842,9 +840,9 @@ class CompoundSequence implements Sequence {
     public String toString() {
         final StringBuilder out = new StringBuilder();
         // Get the index of the last segment, accounting for max string size.
-        final int last = segment(MAX_STRING_SIZE,subSizes);
+        final int last = segment(Integer.MAX_VALUE,subSizes);
         for(int i = 0;i < last;++i) out.append(data[i]);
-        final long diff = MAX_STRING_SIZE - out.length();
+        final long diff = Integer.MAX_VALUE - out.length();
         return out.append(
             diff < data[last].size()? data[last].subSequence(0L,diff)
                                     : data[last]
