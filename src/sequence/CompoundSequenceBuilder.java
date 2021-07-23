@@ -103,7 +103,6 @@ public class CompoundSequenceBuilder implements SequenceBuilder {
     public Sequence build() throws IllegalArgumentException,
                                    UncheckedIOException {
         if(data == null || data.length == 0) return EMPTY;
-        if(data.length == 1) return data[0];
         // Remove null and empty sequences.
         int set = 0;
         long ts = 0;
@@ -115,7 +114,6 @@ public class CompoundSequenceBuilder implements SequenceBuilder {
                 ++set;
             }
         }
-        if(set == 0) return data[0];
         if(set != data.length) {
             {
                 final Sequence[] tmp = new Sequence[set];
@@ -155,6 +153,7 @@ public class CompoundSequenceBuilder implements SequenceBuilder {
                     .formatted(start,end)
                 );
         }
-        return CompoundSequence.internalSS(data,sizes,start,end,constructor());
+        return set == 0? data[0].subSequence(start,end)
+                       : CompoundSequence.internalSS(data,sizes,start,end,constructor());
     }
 }
