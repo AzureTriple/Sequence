@@ -14,6 +14,8 @@ Sequences can take one of a few different forms, with each form tailored to fit 
  
 Each sequence type also has a `MutableSequence` form, where the type name is the same except with the word `Mutable` prepended. In the case of `MutableCompoundSequence`, the backing type changes to `MutableSequence[]`.
 
+The `SequenceBuilder`s do not guarantee which type will be constructed. If the builders detect that the input represents an empty sequence, `Sequence.EMPTY` is returned (which is its own type). Additionally, `CompoundSequence`s may return a sub-sequence of an input child sequence if that is the only used sequence in the input.
+
 Since `FileSequence` and `MutableFileSequence` objects obviously use I/O operations, several methods in the `Sequence` interface are declared with the `throws UncheckedIOException` clause. Methods in certain types which are guaranteed to never cause I/O issues are marked with the `@NoIO` annotation in the source code. Additionally, the `@NoIO` annotation can also specify a `suppresses` argument, which indicates that the method cannot cause a specific issue (e.g. something annotated `@NoIO(suppresses = Suppresses.EXCEPTIONS)` cannot raise I/O related exceptions, but may still leak resources if the object is never closed). Unless guaranteed to be unnecessary by the `@NoIO` annotation, it is the user's responsibility to ensure that the object's `close()` method is eventually called before the object is deallocated or when an un-recoverable exception is thrown (i.e. the `close()` method is unnecessary if and only if the object is equal to `Sequence.EMPTY`, is an `ArraySequence`, or is a `CompoundSequence` which contains only `ArraySequence`s).
 
 ## The `FileSequence` Implementation
