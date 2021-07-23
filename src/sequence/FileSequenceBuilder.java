@@ -118,7 +118,7 @@ public class FileSequenceBuilder implements SequenceBuilder {
         return this;
     }
     /**
-     * @param cs The charset used to decode the file.
+     * Sets the charset used to decode the input file.
      * 
      * @return <code>this</code>
      */

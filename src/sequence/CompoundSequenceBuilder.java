@@ -103,7 +103,8 @@ public class CompoundSequenceBuilder implements SequenceBuilder {
     public Sequence build() throws IllegalArgumentException,
                                    UncheckedIOException {
         if(data == null || data.length == 0) return EMPTY;
-        // Remove null and empty sequences.
+        // Remove null and empty sequences, and ensure that they match this sequence's
+        // mutability.
         int set = 0;
         long ts = 0;
         long[] sizes = new long[data.length];
@@ -114,6 +115,8 @@ public class CompoundSequenceBuilder implements SequenceBuilder {
                 ++set;
             }
         }
+        
+        // Collapse the array where possible.
         if(set != data.length) {
             {
                 final Sequence[] tmp = new Sequence[set];
@@ -127,13 +130,13 @@ public class CompoundSequenceBuilder implements SequenceBuilder {
             }
         }
         
+        // Check indices.
         if(start == null) start = 0L;
         else if(ts < start || start < 0L && (start += ts) < 0L)
             throw new IllegalArgumentException(
                 "Invalid start index %d for array of length %d."
                 .formatted(start,ts)
             );
-        
         if(end == null) {
             if(length == null) end = ts;
             else if(length < 0L || (end = length + start) > ts)
@@ -153,7 +156,7 @@ public class CompoundSequenceBuilder implements SequenceBuilder {
                     .formatted(start,end)
                 );
         }
-        return set == 0? data[0].subSequence(start,end)
+        return set == 0? data[0].subSequence(start,end) // Check for singletons.
                        : CompoundSequence.internalSS(data,sizes,start,end,constructor());
     }
 }
