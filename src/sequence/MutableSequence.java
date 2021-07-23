@@ -164,6 +164,5 @@ public interface MutableSequence extends Sequence {
     
     @Override
     MutableSequence copyTo(char[] arr,int offset) throws IllegalArgumentException,
-                                                         IndexOutOfBoundsException,
                                                          UncheckedIOException;
 }

@@ -235,7 +235,6 @@ class MutableCompoundSequence extends CompoundSequence implements MutableSequenc
     @Override
     public MutableSequence copyTo(final char[] arr,final int offset)
                                   throws IllegalArgumentException,
-                                         IndexOutOfBoundsException,
                                          UncheckedIOException {
         super.copyTo(arr,offset);
         return this;

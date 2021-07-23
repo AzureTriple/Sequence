@@ -71,7 +71,7 @@ class ArraySequence implements Sequence {
      * included in the range of valid indices.
      */
     static int ssidx(final int idx,final int start,final int end)
-                               throws IndexOutOfBoundsException {
+                     throws IndexOutOfBoundsException {
         final int out = idx + (idx < 0? end : start);
         if(end < out || out < start)
             throw new IndexOutOfBoundsException(
@@ -92,7 +92,7 @@ class ArraySequence implements Sequence {
                 "Invalid range: [%d,%d)"
                 .formatted(end,start)
             );
-        return new ArraySequence(data,start,end,end - start);
+        return start == end? EMPTY : new ArraySequence(data,start,end,end - start);
     }
     @NoIO @Override
     public Sequence subSequence(final long start,final long end) throws IndexOutOfBoundsException {
@@ -239,7 +239,7 @@ class ArraySequence implements Sequence {
                     "Range [%d,%d) is invalid."
                     .formatted(a,b)
                 );
-            return new ArraySequence(data,a,b,b - a);
+            return a == b? EMPTY : new ArraySequence(data,a,b,b - a);
         }
         
         abstract int strBegin();
@@ -394,8 +394,7 @@ class ArraySequence implements Sequence {
     @NoIO @Override public String toString() {return String.valueOf(data,start,length);}
     
     @NoIO @Override
-    public Sequence copyTo(final char[] arr,int offset) throws IllegalArgumentException,
-                                                               IndexOutOfBoundsException {
+    public Sequence copyTo(final char[] arr,int offset) throws IllegalArgumentException {
         final int size = length();
         if(size > 0) {
             if(offset < 0) offset += arr.length;

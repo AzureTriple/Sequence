@@ -78,7 +78,7 @@ class MutableArraySequence extends ArraySequence implements MutableSequence {
                 "Invalid range: [%d,%d)"
                 .formatted(end,start)
             );
-        return new MutableArraySequence(data,start,end,end-start);
+        return start == end? EMPTY : new MutableArraySequence(data,start,end,end-start);
     }
     @NoIO @Override
     public MutableSequence subSequence(final long start,final long end)
@@ -93,8 +93,7 @@ class MutableArraySequence extends ArraySequence implements MutableSequence {
                 "Invalid range: [%d,%d)"
                 .formatted(end,start)
             );
-        length = (this.end = end) - (this.start = start);
-        return this;
+        return (length = (this.end = end) - (this.start = start)) == 0? EMPTY : this;
     }
     @NoIO @Override
     public MutableSequence mutableSubSequence(final long start,final long end)
@@ -184,7 +183,7 @@ class MutableArraySequence extends ArraySequence implements MutableSequence {
                     "Range [%d,%d) is invalid."
                     .formatted(a,b)
                 );
-            return new MutableArraySequence(sooper.data,a,b,b-a);
+            return a == b? EMPTY : new MutableArraySequence(sooper.data,a,b,b-a);
         }
     }
     /**Mutable Forward Array Sequence Iterator*/
@@ -203,8 +202,7 @@ class MutableArraySequence extends ArraySequence implements MutableSequence {
     
     @NoIO @Override
     public MutableSequence copyTo(final char[] arr,final int offset)
-                                  throws IllegalArgumentException,
-                                         IndexOutOfBoundsException {
+                                  throws IllegalArgumentException {
         super.copyTo(arr,offset);
         return this;
     }

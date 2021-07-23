@@ -851,7 +851,6 @@ class CompoundSequence implements Sequence {
     
     @Override
     public Sequence copyTo(final char[] arr,int offset) throws IllegalArgumentException,
-                                                               IndexOutOfBoundsException,
                                                                UncheckedIOException {
         final long size = size();
         if(size > 0L) {

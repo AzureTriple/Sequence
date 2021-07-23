@@ -386,9 +386,20 @@ public interface Sequence extends CharSequence,
     @Override String toString() throws UncheckedIOException;
     @Override void close() throws UncheckedIOException;
     
-    /**Copies this sequence to the specified character array.*/
+    /**
+     * Copies this sequence to the specified character array.
+     * 
+     * @param arr    A character array to hold the characters.
+     * @param offset An index in the range <code>[-arr.length,arr.length)</code>.
+     *               Negative values are wrapped to the end by adding to
+     *               <code>arr.length</code>.
+     * 
+     * @return <code>this</code>
+     * 
+     * @throws IllegalArgumentException The array cannot hold this sequence at the
+     *                                  specified offset.
+     */
     Sequence copyTo(char[] arr,int offset) throws IllegalArgumentException,
-                                                  IndexOutOfBoundsException,
                                                   UncheckedIOException;
     /**Creates a mutable copy of this sequence as a {@linkplain MutableSequence}.*/
     MutableSequence mutableCopy() throws UncheckedIOException;
@@ -396,85 +407,181 @@ public interface Sequence extends CharSequence,
     Sequence immutableCopy() throws UncheckedIOException;
     
     /**A shared instance of an empty sequence.*/
-    MutableSequence EMPTY = new MutableSequence() { //TODO make behavior more standard
+    MutableSequence EMPTY = new MutableSequence() {
         @Override
         public boolean equals(final Object obj) {
             return obj == this || obj instanceof CharSequence && ((CharSequence)obj).isEmpty();
         }
-        @NoIO @Override public MutableSequence subSequence(int start,int end) {return this;}
-        @NoIO @Override public MutableSequence subSequence(long start,long end) {return this;}
+        private void ssoob(final int idx) {
+            if(idx != 0)
+                throw new IndexOutOfBoundsException(
+                    "%d is outside the range [0,0] (shifted: %<d,[0,0])."
+                    .formatted(idx)
+                );
+        }
+        private void ssoob(final long idx) {
+            if(idx != 0L)
+                throw new IndexOutOfBoundsException(
+                    "%d is outside the range [0,0] (shifted: %<d,[0,0])."
+                    .formatted(idx)
+                );
+        }
+        private IndexOutOfBoundsException oob(final int idx) {
+            return new IndexOutOfBoundsException(
+                "%d is outside the range <EMPTY> (shifted: %<d,<EMPTY>)."
+                .formatted(idx)
+            );
+        }
+        private IndexOutOfBoundsException oob(final long idx) {
+            return new IndexOutOfBoundsException(
+                "%d is outside the range <EMPTY> (shifted: %<d,<EMPTY>)."
+                .formatted(idx)
+            );
+        }
         @NoIO @Override
-        public MutableSequence mutableSubSequence(int start,int end) {
+        public MutableSequence subSequence(final int start,final int end)
+                                           throws IndexOutOfBoundsException {
+            ssoob(start); ssoob(end);
             return this;
         }
         @NoIO @Override
-        public MutableSequence mutableSubSequence(long start,long end) {
+        public MutableSequence subSequence(final long start,final long end)
+                                           throws IndexOutOfBoundsException {
+            ssoob(start); ssoob(end);
             return this;
+        }
+        @NoIO @Override
+        public MutableSequence mutableSubSequence(final int start,final int end)
+                                                  throws IndexOutOfBoundsException {
+            return subSequence(start,end);
+        }
+        @NoIO @Override
+        public MutableSequence mutableSubSequence(final long start,final long end)
+                                                  throws IndexOutOfBoundsException {
+            return subSequence(start,end);
         }
         @Override public int length() {return 0;}
-        @NoIO @Override public char charAt(int index) {return 0;}
-        @NoIO @Override public char charAt(long index) {return 0;}
+        @Override public long size() {return 0L;}
+        @Override public boolean isEmpty() {return true;}
+        @NoIO @Override
+        public char charAt(final int index) throws IndexOutOfBoundsException {
+            throw oob(index);
+        }
+        @NoIO @Override
+        public char charAt(final long index) throws IndexOutOfBoundsException {
+            throw oob(index);
+        }
         
-        @NoIO @Override public MutableSequence set(int index,char c) {return this;}
-        @NoIO @Override public MutableSequence set(long index,char c) {return this;}
-        @NoIO @Override public MutableSequence set(int index,char[] c) {return this;}
-        @NoIO @Override public MutableSequence set(long index,char[] c) {return this;}
-        @NoIO @Override public MutableSequence set(int index,CharSequence c) {return this;}
-        @NoIO @Override public MutableSequence set(long index,CharSequence c) {return this;}
+        @NoIO @Override
+        public MutableSequence set(final int index,final char c) throws IndexOutOfBoundsException {
+            throw oob(index);
+        }
+        @NoIO @Override
+        public MutableSequence set(final long index,final char c) throws IndexOutOfBoundsException {
+            throw oob(index);
+        }
+        @NoIO @Override
+        public MutableSequence set(final int index,final char[] c) throws IndexOutOfBoundsException {
+            throw oob(index);
+        }
+        @NoIO @Override
+        public MutableSequence set(final long index,final char[] c) throws IndexOutOfBoundsException {
+            throw oob(index);
+        }
+        @NoIO @Override
+        public MutableSequence set(final int index,final CharSequence c) throws IndexOutOfBoundsException {
+            throw oob(index);
+        }
+        @NoIO @Override
+        public MutableSequence set(final long index,final CharSequence c) throws IndexOutOfBoundsException {
+            throw oob(index);
+        }
         
         @NoIO
         final class EMPTYITR implements MutableSequenceIterator,SimpleSequenceIterator {
-            @NoIO @Override public SimpleSequenceIterator skip(long count) {return this;}
+            @NoIO @Override
+            public SimpleSequenceIterator skip(final long count) {
+                throw oob(count);
+            }
             @Override public long index() {return 0L;}
             @Override public long offset() {return 0L;}
-            @Override public MutableSequence getParent() {return (MutableSequence)EMPTY;}
+            @Override public MutableSequence getParent() {return EMPTY;}
             
             @NoIO @Override public Character peek() {return null;}
-            @NoIO @Override public Character peek(int offset) {return null;}
-            @NoIO @Override public Character peek(long offset) {return null;}
+            @NoIO @Override public Character peek(final int offset) {return null;}
+            @NoIO @Override public Character peek(final long offset) {return null;}
             
             @Override public boolean hasNext() {return false;}
             @NoIO @Override public Character next() {return null;}
             
             @NoIO @Override public Character skipWS() {return null;}
-            @NoIO @Override public Character skipWS(int limit) {return null;}
-            @NoIO @Override public Character skipWS(long limit) {return null;}
+            @NoIO @Override public Character skipWS(final int limit) {return null;}
+            @NoIO @Override public Character skipWS(final long limit) {return null;}
             @NoIO @Override public Character peekNonWS() {return null;}
-            @NoIO @Override public Character peekNonWS(int limit) {return null;}
-            @NoIO @Override public Character peekNonWS(long limit) {return null;}
+            @NoIO @Override public Character peekNonWS(final int limit) {return null;}
+            @NoIO @Override public Character peekNonWS(final long limit) {return null;}
             @NoIO @Override public Character peekNextNonWS() {return null;}
-            @NoIO @Override public Character peekNextNonWS(int limit) {return null;}
-            @NoIO @Override public Character peekNextNonWS(long limit) {return null;}
+            @NoIO @Override public Character peekNextNonWS(final int limit) {return null;}
+            @NoIO @Override public Character peekNextNonWS(final long limit) {return null;}
             @NoIO @Override public Character nextNonWS() {return null;}
-            @NoIO @Override public Character nextNonWS(int limit) {return null;}
-            @NoIO @Override public Character nextNonWS(long limit) {return null;}
+            @NoIO @Override public Character nextNonWS(final int limit) {return null;}
+            @NoIO @Override public Character nextNonWS(final long limit) {return null;}
             
-            @Override public EMPTYITR mark() {return this;}
-            @Override public EMPTYITR mark(int offset) {return this;}
-            @Override public EMPTYITR mark(long offset) {return this;}
+            @Override public MutableSequenceIterator mark() {return this;}
+            @Override
+            public MutableSequenceIterator mark(final int offset) throws IndexOutOfBoundsException {
+                throw oob(offset);
+            }
+            @Override
+            public MutableSequenceIterator mark(final long offset) throws IndexOutOfBoundsException {
+                throw oob(offset);
+            }
             
-            @NoIO @Override public MutableSequenceIterator set(char c) {return this;}
-            @NoIO @Override public MutableSequenceIterator set(int idx,char c) {return this;}
-            @NoIO @Override public MutableSequenceIterator set(long idx,char c) {return this;}
+            @NoIO @Override
+            public MutableSequenceIterator set(final char c) throws IndexOutOfBoundsException {
+                throw oob(0);
+            }
+            @NoIO @Override
+            public MutableSequenceIterator set(final int offset,final char c) throws IndexOutOfBoundsException {
+                throw oob(offset);
+            }
+            @NoIO @Override
+            public MutableSequenceIterator set(final long offset,final char c) throws IndexOutOfBoundsException {
+                throw oob(offset);
+            }
             
-            @NoIO @Override public MutableSequence subSequence() {return (MutableSequence)EMPTY;}
+            @NoIO @Override public MutableSequence subSequence() {return EMPTY;}
             
-            @NoIO @Override public EMPTYITR jumpTo(int index) {return this;}
-            @NoIO @Override public EMPTYITR jumpTo(long index) {return this;}
-            @NoIO @Override public EMPTYITR jumpOffset(int offset) {return this;}
-            @NoIO @Override public EMPTYITR jumpOffset(long offset) {return this;}
+            @NoIO @Override
+            public MutableSequenceIterator jumpTo(final int index) throws IndexOutOfBoundsException {
+                throw oob(index);
+            }
+            @NoIO @Override
+            public MutableSequenceIterator jumpTo(final long index) throws IndexOutOfBoundsException {
+                throw oob(index);
+            }
+            @NoIO @Override
+            public MutableSequenceIterator jumpOffset(final int offset) throws IndexOutOfBoundsException {
+                throw oob(offset);
+            }
+            @NoIO @Override
+            public MutableSequenceIterator jumpOffset(final long offset) throws IndexOutOfBoundsException {
+                throw oob(offset);
+            }
             
-            @NoIO @Override public void forEachRemaining(Consumer<? super Character> action) {}
+            @NoIO @Override public void forEachRemaining(final Consumer<? super Character> action) {}
             @NoIO @Override public void close() {}
         }
-        @NoIO @Override public SimpleSequenceIterator iterator() {return new EMPTYITR();}
-        @NoIO @Override public MutableSequenceIterator forwardIterator() {return new EMPTYITR();}
-        @NoIO @Override public MutableSequenceIterator reverseIterator() {return new EMPTYITR();}
+        final EMPTYITR ITER = new EMPTYITR();
+        @NoIO @Override public SimpleSequenceIterator iterator() {return ITER;}
+        @NoIO @Override public MutableSequenceIterator forwardIterator() {return ITER;}
+        @NoIO @Override public MutableSequenceIterator reverseIterator() {return ITER;}
         
         @NoIO @Override public void close() {}
         @NoIO @Override public String toString() {return "";}
         
-        @NoIO @Override public MutableSequence copyTo(char[] arr,int offset) {return this;}
+        @NoIO @Override
+        public MutableSequence copyTo(final char[] arr,final int offset) {return this;}
         
         @NoIO @Override public MutableSequence mutableCopy() {return this;}
         @NoIO @Override public Sequence immutableCopy() {return this;}

@@ -201,7 +201,7 @@ class MutableFileSequence extends FileSequence implements MutableSequence {
                 "Range [%d,%d) is invalid."
                 .formatted(end / M_SCALAR,start / M_SCALAR)
             );
-        return new MutableFileSequence(file,start,end,end - start,suffix);
+        return start == end? EMPTY : new MutableFileSequence(file,start,end,end - start,suffix);
     }
     @Override
     public MutableSequence mutableSubSequence(final int start,final int end)
@@ -218,8 +218,7 @@ class MutableFileSequence extends FileSequence implements MutableSequence {
                 "Invalid range: [%d,%d)"
                 .formatted(end / M_SCALAR,start / M_SCALAR)
             );
-        length = (this.end = end) - (this.start = start);
-        return this;
+        return (length = (this.end = end) - (this.start = start)) == 0? EMPTY : this;
     }
     
     /**Mutable File Sequence Iterator*/
@@ -273,7 +272,7 @@ class MutableFileSequence extends FileSequence implements MutableSequence {
                     "Range [%d,%d) is invalid."
                     .formatted(a / M_SCALAR,b / M_SCALAR)
                 );
-            return new MutableFileSequence(sooper.file,a,b,b-a,sooper.suffix);
+            return a == b? EMPTY : new MutableFileSequence(sooper.file,a,b,b-a,sooper.suffix);
         }
     }
     /**Mutable Forward File Sequence Iterator*/
@@ -301,7 +300,6 @@ class MutableFileSequence extends FileSequence implements MutableSequence {
     @Override
     public MutableSequence copyTo(final char[] arr,final int offset)
                                   throws IllegalArgumentException,
-                                         IndexOutOfBoundsException,
                                          UncheckedIOException {
         super.copyTo(arr,offset);
         return this;

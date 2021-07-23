@@ -180,7 +180,7 @@ class FileSequence implements Sequence {
                 "Range [%d,%d) is invalid."
                 .formatted(end / cs.size,start / cs.size)
             );
-        return new FileSequence(file,start,end,end - start,mutability,suffix,cs);
+        return start == end? EMPTY : new FileSequence(file,start,end,end - start,mutability,suffix,cs);
     }
     
     /**
@@ -428,7 +428,7 @@ class FileSequence implements Sequence {
                     "Range [%d,%d) is invalid."
                     .formatted(a / scalar,b / scalar)
                 );
-            return new FileSequence(file,a,b,b - a,fs.mutability,suffix,cs);
+            return a == b? EMPTY : new FileSequence(file,a,b,b - a,fs.mutability,suffix,cs);
         }
         
         abstract long strBegin();
@@ -695,17 +695,11 @@ class FileSequence implements Sequence {
     
     @Override
     public Sequence copyTo(final char[] arr,final int offset) throws IllegalArgumentException,
-                                                                     IndexOutOfBoundsException,
                                                                      UncheckedIOException {
         final long size = size();
         if(size != 0L) {
             final int offs = offset < 0? offset + arr.length : offset;
-            if(arr.length <= offs || offs < 0)
-                throw new IndexOutOfBoundsException(
-                    "%d (shifted: %d) is outside the range [%d,%d)."
-                    .formatted(offset,offs,0,arr.length)
-                );
-            if(offs + size > arr.length)
+            if(arr.length <= offs || offs < 0 || offs + size > arr.length)
                 throw new IllegalArgumentException(
                     "Cannot copy sequence of size %d to an array of size %d at index %d."
                     .formatted(size,arr.length,offs)
