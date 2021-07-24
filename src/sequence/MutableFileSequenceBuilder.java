@@ -5,6 +5,7 @@ import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.charset.Charset;
 import java.nio.file.Files;
+import java.nio.file.Path;
 import sequence.FileSequence.Mutability;
 import util.FixedSizeCharset;
 
@@ -18,6 +19,52 @@ import util.FixedSizeCharset;
 public class MutableFileSequenceBuilder extends FileSequenceBuilder {
     public MutableFileSequenceBuilder() {super();}
     public static MutableFileSequenceBuilder builder() {return new MutableFileSequenceBuilder();}
+    
+    @Override
+    public MutableFileSequenceBuilder data(final File data) {
+        super.data(data);
+        return this;
+    }
+    @Override
+    public MutableFileSequenceBuilder data(final Path data) {
+        super.data(data);
+        return this;
+    }
+    @Override
+    public MutableFileSequenceBuilder data(final String data) {
+        super.data(data);
+        return this;
+    }
+    @Override
+    public MutableFileSequenceBuilder start(final Long start) {
+        super.start(start);
+        return this;
+    }
+    @Override
+    public MutableFileSequenceBuilder end(final Long end) {
+        super.end(end);
+        return this;
+    }
+    @Override
+    public MutableFileSequenceBuilder length(final Long length) {
+        super.length(length);
+        return this;
+    }
+    @Override
+    public MutableFileSequenceBuilder range(final Long start,final Long end) {
+        super.range(start,end);
+        return this;
+    }
+    @Override
+    public MutableFileSequenceBuilder offset(final Long offset,final Long length) {
+        super.offset(offset,length);
+        return this;
+    }
+    @Override
+    public MutableFileSequenceBuilder charset(final Charset cs) {
+        super.charset(cs);
+        return this;
+    }
     
     FileSequence construct(File data,
                            final long start,
