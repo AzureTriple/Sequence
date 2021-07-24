@@ -201,7 +201,10 @@ class MutableFileSequence extends FileSequence implements MutableSequence {
                 "Range [%d,%d) is invalid."
                 .formatted(end / M_SCALAR,start / M_SCALAR)
             );
-        return start == end? EMPTY : new MutableFileSequence(file,start,end,end - start,suffix);
+        return start != end? start != this.start || end != this.end
+                ? new MutableFileSequence(file,start,end,end - start,suffix)
+                : this
+                : EMPTY;
     }
     @Override
     public MutableSequence mutableSubSequence(final int start,final int end)
@@ -218,7 +221,7 @@ class MutableFileSequence extends FileSequence implements MutableSequence {
                 "Invalid range: [%d,%d)"
                 .formatted(end / M_SCALAR,start / M_SCALAR)
             );
-        return (length = (this.end = end) - (this.start = start)) == 0? EMPTY : this;
+        return (length = (this.end = end) - (this.start = start)) == 0L? EMPTY : this;
     }
     
     /**Mutable File Sequence Iterator*/
@@ -272,7 +275,10 @@ class MutableFileSequence extends FileSequence implements MutableSequence {
                     "Range [%d,%d) is invalid."
                     .formatted(a / M_SCALAR,b / M_SCALAR)
                 );
-            return a == b? EMPTY : new MutableFileSequence(sooper.file,a,b,b-a,sooper.suffix);
+            return a != b? a != sooper.start || b != sooper.end
+                    ? new MutableFileSequence(sooper.file,a,b,b-a,sooper.suffix)
+                    : (MutableSequence)sooper.parent
+                    : EMPTY;
         }
     }
     /**Mutable Forward File Sequence Iterator*/

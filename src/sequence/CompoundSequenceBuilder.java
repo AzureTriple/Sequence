@@ -156,7 +156,9 @@ public class CompoundSequenceBuilder implements SequenceBuilder {
                     .formatted(start,end)
                 );
         }
-        return set == 0? data[0].subSequence(start,end) // Check for singletons.
-                       : CompoundSequence.internalSS(data,sizes,start,end,constructor());
+        return set != 0? start != 0L || end != ts
+                ? CompoundSequence.internalSS(data,sizes,start,end,constructor())
+                : constructor().construct(sizes,data) // No excluded characters
+                : data[0].subSequence(start,end); // Singleton
     }
 }

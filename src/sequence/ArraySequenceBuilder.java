@@ -1,5 +1,7 @@
 package sequence;
 
+import static sequence.Sequence.EMPTY;
+
 import util.NoIO;
 
 /**
@@ -107,7 +109,7 @@ public class ArraySequenceBuilder implements SequenceBuilder {
      */
     @NoIO @Override
     public Sequence build() throws IllegalArgumentException {
-        if(data == null || data.length == 0) return ArraySequence.EMPTY;
+        if(data == null || data.length == 0) return EMPTY;
         
         if(start == null) start = 0;
         else if(data.length < start || start < 0 && (start += data.length) < 0)
@@ -135,6 +137,6 @@ public class ArraySequenceBuilder implements SequenceBuilder {
                     .formatted(start,end)
                 );
         }
-        return length == 0? ArraySequence.EMPTY : construct(data,start,end,length);
+        return length == 0? EMPTY : construct(data,start,end,length);
     }
 }

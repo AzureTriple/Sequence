@@ -137,13 +137,13 @@ class FileSequence implements Sequence {
     }
     char read() throws IOException {return read(data,big);}
     @Override
+    public char charAt(final int index) throws IndexOutOfBoundsException,UncheckedIOException {
+        return charAt((long)index);
+    }
+    @Override
     public char charAt(final long index) throws IndexOutOfBoundsException,UncheckedIOException {
         try {data.seek(idx(index)); return read();}
         catch(final IOException e) {throw ioe(e);}
-    }
-    @Override
-    public char charAt(final int index) throws IndexOutOfBoundsException,UncheckedIOException {
-        return charAt((long)index);
     }
     
     /**
@@ -180,7 +180,11 @@ class FileSequence implements Sequence {
                 "Range [%d,%d) is invalid."
                 .formatted(end / cs.size,start / cs.size)
             );
-        return start == end? EMPTY : new FileSequence(file,start,end,end - start,mutability,suffix,cs);
+        return start != end? start != this.start || end != this.end
+                ? new FileSequence(file,start,end,end - start,mutability,suffix,cs)
+                : this
+                : EMPTY;
+              
     }
     
     /**
@@ -277,7 +281,7 @@ class FileSequence implements Sequence {
         final int scalar;
         final boolean big;
         long cursor,mark;
-        private final FileSequence fs;
+        final FileSequence parent;
         
         FSI(final long begin,final long end,final FileSequence fs)
             throws UncheckedIOException {
@@ -286,7 +290,7 @@ class FileSequence implements Sequence {
             catch(FileNotFoundException|SecurityException e) {throw ioe(e);}
             cursor = mark = begin;
             lastIdx = end;
-            this.fs = fs;
+            this.parent = fs;
             suffix = fs.suffix;
             start = fs.start;
             this.end = fs.end;
@@ -306,7 +310,7 @@ class FileSequence implements Sequence {
         abstract long skipidx(long i);
         
         @Override public long index() {return (cursor - start) / scalar;}
-        @Override public Sequence getParent() {return fs;}
+        @Override public Sequence getParent() {return parent;}
         
         @Override
         public Character peek() throws UncheckedIOException {
@@ -428,7 +432,10 @@ class FileSequence implements Sequence {
                     "Range [%d,%d) is invalid."
                     .formatted(a / scalar,b / scalar)
                 );
-            return a == b? EMPTY : new FileSequence(file,a,b,b - a,fs.mutability,suffix,cs);
+            return a != b? a != start || b != end
+                    ? new FileSequence(file,a,b,b - a,parent.mutability,suffix,cs)
+                    : parent
+                    : EMPTY;
         }
         
         abstract long strBegin();

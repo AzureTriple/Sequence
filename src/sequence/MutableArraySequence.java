@@ -78,7 +78,10 @@ class MutableArraySequence extends ArraySequence implements MutableSequence {
                 "Invalid range: [%d,%d)"
                 .formatted(end,start)
             );
-        return start == end? EMPTY : new MutableArraySequence(data,start,end,end-start);
+        return start != end? start != this.start || end != this.end
+                ? new MutableArraySequence(data,start,end,end-start)
+                : this
+                : EMPTY;
     }
     @NoIO @Override
     public MutableSequence subSequence(final long start,final long end)
@@ -183,7 +186,10 @@ class MutableArraySequence extends ArraySequence implements MutableSequence {
                     "Range [%d,%d) is invalid."
                     .formatted(a,b)
                 );
-            return a == b? EMPTY : new MutableArraySequence(sooper.data,a,b,b-a);
+            return a != b? a != sooper.start || b != sooper.end
+                    ? new MutableArraySequence(sooper.data,a,b,b - a)
+                    : (MutableSequence)sooper.parent
+                    : EMPTY;
         }
     }
     /**Mutable Forward Array Sequence Iterator*/

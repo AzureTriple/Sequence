@@ -96,13 +96,13 @@ class CompoundSequence implements Sequence {
     /**@return The character index set relative to the specified segment.*/
     long relative(final long index,final int segment) {return relative(index,segment,subSizes);}
     @Override
+    public char charAt(final int index) throws IndexOutOfBoundsException,UncheckedIOException {
+        return charAt((long)index);
+    }
+    @Override
     public char charAt(long index) throws IndexOutOfBoundsException,UncheckedIOException {
         final int segment = segment(index = idx(index));
         return data[segment].charAt(relative(index,segment));
-    }
-    @Override
-    public char charAt(final int index) throws IndexOutOfBoundsException,UncheckedIOException {
-        return charAt((long)index);
     }
     
     /**
@@ -125,9 +125,9 @@ class CompoundSequence implements Sequence {
      */
     long ssidx(final long idx) throws IndexOutOfBoundsException {return ssidx(idx,size());}
     static Sequence[] ndata(final Sequence[] data,
-                                      final int first,final int last,
-                                      final long r0,final long r1)
-                                      throws UncheckedIOException {
+                            final int first,final int last,
+                            final long r0,final long r1)
+                            throws UncheckedIOException {
         final Sequence[] ndata = new Sequence[last - first + 1];
         ndata[0] = data[first].subSequence(r0,data[first].size());
         System.arraycopy(data,first + 1,ndata,1,last - first - 1);
@@ -135,11 +135,11 @@ class CompoundSequence implements Sequence {
         return ndata;
     }
     static long[] nss(final Sequence[] ndata,
-                                final long lastSize,
-                                final long[] subSizes,
-                                final int first,
-                                final long r0,final long r1)
-                                throws UncheckedIOException {
+                      final long lastSize,
+                      final long[] subSizes,
+                      final int first,
+                      final long r0,final long r1)
+                      throws UncheckedIOException {
         final long[] nss = new long[ndata.length];
         {
             final long diff = r0 + (first == 0? 0L : subSizes[first - 1]);
@@ -174,6 +174,11 @@ class CompoundSequence implements Sequence {
         return constructor.construct(nss,ndata);
     }
     @Override
+    public Sequence subSequence(final int start,final int end) throws IndexOutOfBoundsException,
+                                                                      UncheckedIOException {
+        return subSequence((long)start,(long)end);
+    }
+    @Override
     public Sequence subSequence(long start,long end) throws IndexOutOfBoundsException,
                                                             UncheckedIOException {
         if((end = ssidx(end)) < (start = ssidx(start)))
@@ -181,12 +186,8 @@ class CompoundSequence implements Sequence {
                 "Range [%d,%d) is invalid."
                 .formatted(start,end)
             );
-        return internalSS(data,subSizes,start,end,constructor());
-    }
-    @Override
-    public Sequence subSequence(final int start,final int end) throws IndexOutOfBoundsException,
-                                                                      UncheckedIOException {
-        return subSequence((long)start,(long)end);
+        return start != 0L || end != size()? internalSS(data,subSizes,start,end,constructor())
+                                           : this;
     }
     
     /**Simple Compound Sequence Iterator*/
@@ -288,7 +289,7 @@ class CompoundSequence implements Sequence {
         SequenceIterator itr;
         long cursor,mark;
         int segment;
-        private final CompoundSequence cs;
+        private final CompoundSequence parent;
         private final CSConstructor constructor;
         
         abstract void increment() throws UncheckedIOException;
@@ -302,14 +303,14 @@ class CompoundSequence implements Sequence {
             data = parent.data;
             subSizes = parent.subSizes;
             this.end = parent.size();
-            cs = parent;
+            this.parent = parent;
             lastIdx = end;
             itr = getItr(data[segment = segment(cursor = mark = begin,subSizes)]);
             this.constructor = parent.constructor();
         }
         
         @Override public long index() {return cursor;}
-        @Override public Sequence getParent() {return cs;}
+        @Override public Sequence getParent() {return parent;}
         
         @Override
         public Character peek() throws UncheckedIOException {
@@ -460,7 +461,8 @@ class CompoundSequence implements Sequence {
                     "Range [%d,%d) is invalid."
                     .formatted(a,b)
                 );
-            return internalSS(data,subSizes,a,b,constructor);
+            return a != 0L || b != end? internalSS(data,subSizes,a,b,constructor)
+                                      : parent;
         }
         
         abstract String fullStrings(String current) throws UncheckedIOException;

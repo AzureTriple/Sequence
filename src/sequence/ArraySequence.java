@@ -92,7 +92,10 @@ class ArraySequence implements Sequence {
                 "Invalid range: [%d,%d)"
                 .formatted(end,start)
             );
-        return start == end? EMPTY : new ArraySequence(data,start,end,end - start);
+        return start != end? start != this.start || end != this.end
+                ? new ArraySequence(data,start,end,end - start)
+                : this
+                : EMPTY;
     }
     @NoIO @Override
     public Sequence subSequence(final long start,final long end) throws IndexOutOfBoundsException {
@@ -239,7 +242,10 @@ class ArraySequence implements Sequence {
                     "Range [%d,%d) is invalid."
                     .formatted(a,b)
                 );
-            return a == b? EMPTY : new ArraySequence(data,a,b,b - a);
+            return a != b? a != start || b != end
+                    ? new ArraySequence(data,a,b,b - a)
+                    : parent
+                    : EMPTY;
         }
         
         abstract int strBegin();
