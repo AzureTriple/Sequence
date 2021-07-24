@@ -91,9 +91,11 @@ public class CompoundSequenceBuilder implements SequenceBuilder {
     }
     
     CSConstructor constructor() {return CompoundSequence.CONSTRUCTOR;}
-    Sequence prepSequence(final Sequence in) {
-        return in instanceof MutableSequence? in.immutableCopy()
-                                            : in;
+    Sequence prepSequence(final Sequence in) throws UncheckedIOException {
+        return !(in instanceof MutableSequence)? in.closeIsShared()
+                                                   ? in.shallowCopy()
+                                                   : in
+                                               : in.immutableCopy();
     }
     /**
      * @throws IllegalArgumentException The indices are outside the input data or
@@ -108,11 +110,18 @@ public class CompoundSequenceBuilder implements SequenceBuilder {
         int set = 0;
         long ts = 0;
         long[] sizes = new long[data.length];
-        for(int i = 0;i < data.length;++i) {
-            if(data[i] != null && !data[i].isEmpty()) {
-                data[set] = prepSequence(data[i]);
-                sizes[set] = ts += data[set].size();
-                ++set;
+        {
+            int i = 0;
+            try {
+                for(;i < data.length;++i) {
+                    if(data[i] != null && !data[i].isEmpty()) {
+                        sizes[set] = ts += (data[set] = prepSequence(data[i])).size();
+                        ++set;
+                    }
+                }
+            } catch(final UncheckedIOException e) {
+                CompoundSequence.closeIgnore(data,0,set);
+                throw e;
             }
         }
         
@@ -156,9 +165,14 @@ public class CompoundSequenceBuilder implements SequenceBuilder {
                     .formatted(start,end)
                 );
         }
-        return set != 0? start != 0L || end != ts
-                ? CompoundSequence.internalSS(data,sizes,start,end,constructor())
-                : constructor().construct(sizes,data) // No excluded characters
-                : data[0].subSequence(start,end); // Singleton
+        try {
+            return set != 0? start != 0L || end != ts
+                    ? CompoundSequence.internalSS(data,sizes,start,end,constructor())
+                    : constructor().construct(sizes,data) // No excluded characters
+                    : data[0].subSequence(start,end); // Singleton
+        } catch(final UncheckedIOException e) {
+            CompoundSequence.closeIgnore(data,0,data.length);
+            throw e;
+        }
     }
 }

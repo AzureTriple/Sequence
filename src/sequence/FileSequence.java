@@ -79,19 +79,6 @@ class FileSequence implements Sequence {
         this.suffix = suffix;
         big = (this.cs = cs).size > 1;
     }
-    FileSequence(final File file,final RandomAccessFile data,
-                 final long start,final long end,final long length,
-                 final Mutability mutability,final String suffix,
-                 final FixedSizeCharset cs) {
-        this.file = file;
-        this.data = data;
-        this.start = start;
-        this.end = end;
-        this.length = length;
-        this.mutability = mutability;
-        this.suffix = suffix;
-        big = (this.cs = cs).size > 1;
-    }
     
     @Override
     public boolean equals(final Object obj) {
@@ -736,22 +723,33 @@ class FileSequence implements Sequence {
     }
     @Override
     public MutableSequence mutableCopy() throws UncheckedIOException {
-        final File nf;
-        try {FixedSizeCharset.transfer(file,cs,nf = tmpFile(Mutability.MUTABLE),MutableFileSequence.MUTABLE_CS);}
-        catch(IOException|SecurityException e) {throw ioe(e);}
-        return new MutableFileSequence(nf,start,end,length,suffix);
+        final File nf = tmpFile(Mutability.MUTABLE);
+        try {
+            FixedSizeCharset.transfer(file,cs,nf,MutableFileSequence.MUTABLE_CS);
+            return new MutableFileSequence(nf,start,end,length,suffix);
+        } catch(UncheckedIOException|IOException|SecurityException e) {
+            try {nf.delete();}
+            catch(final SecurityException e1) {}
+            throw ioe(e);
+        }
     }
     @Override
     public Sequence immutableCopy() throws UncheckedIOException {
-        final File nf;
-        try {
-            nf = tmpFile(Mutability.IMMUTABLE);
-            // Immutable file sequence is already in it's minimal form, don't need to re-encode.
-            try(final BufferedInputStream I = new BufferedInputStream(new FileInputStream(file));
-                final BufferedOutputStream O = new BufferedOutputStream(new FileOutputStream(nf))) {
-                I.transferTo(O);
-            }
-        } catch(IOException|SecurityException e) {throw ioe(e);}
-        return new FileSequence(nf,start,end,length,Mutability.IMMUTABLE,suffix,cs);
+        final File nf = tmpFile(Mutability.IMMUTABLE);
+        // Immutable file sequence is already in it's minimal form, don't need to re-encode.
+        try(final BufferedInputStream I = new BufferedInputStream(new FileInputStream(file));
+            final BufferedOutputStream O = new BufferedOutputStream(new FileOutputStream(nf))) {
+            I.transferTo(O);
+            return new FileSequence(nf,start,end,length,Mutability.IMMUTABLE,suffix,cs);
+        } catch(UncheckedIOException|IOException|SecurityException e) {
+            try {nf.delete();}
+            catch(final SecurityException e1) {}
+            throw ioe(e);
+        }
+    }
+    @Override public boolean closeIsShared() {return true;}
+    @Override
+    public Sequence shallowCopy() throws UncheckedIOException {
+        return new FileSequence(file,start,end,length,mutability,suffix,cs);
     }
 }

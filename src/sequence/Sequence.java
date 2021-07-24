@@ -384,6 +384,10 @@ public interface Sequence extends CharSequence,
                                                      UncheckedIOException;
     
     @Override String toString() throws UncheckedIOException;
+    /**
+     * @implNote In general, using this sequence after this method has been called
+     *           yields undefined behavior.
+     */
     @Override void close() throws UncheckedIOException;
     
     /**
@@ -405,6 +409,19 @@ public interface Sequence extends CharSequence,
     MutableSequence mutableCopy() throws UncheckedIOException;
     /**Creates an immutable copy of this sequence.*/
     Sequence immutableCopy() throws UncheckedIOException;
+    /**
+     * @return <code>true</code> iff the {@linkplain #close()} method closes all
+     *         references to this sequence.
+     * 
+     * @see #shallowCopy()
+     */
+    default boolean closeIsShared() {return false;}
+    /**
+     * Creates a shallow copy of this instance. Using this method is preferred over
+     * using a plain copy assignment when {@linkplain #closeIsShared()} returns
+     * <code>true</code>.
+     */
+    default Sequence shallowCopy() throws UncheckedIOException {return this;}
     
     /**A shared instance of an empty sequence.*/
     MutableSequence EMPTY = new MutableSequence() {

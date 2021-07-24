@@ -17,15 +17,35 @@ import util.NoIO.Suppresses;
  * @author AzureTriple
  */
 class CompoundSequence implements Sequence {
+    static interface CSConstructor {Sequence construct(long[] nss,Sequence[] ndata);}
     static final CSConstructor CONSTRUCTOR = (s,d) -> new CompoundSequence(s,d);
     
     Sequence[] data;
     /**Holds the total size of all sequences before and at each index.*/
     long[] subSizes;
+    boolean closeIsShared;
+    
+    static void closeIgnore(final Sequence s) {try {s.close();} catch(final UncheckedIOException e) {}}
+    static void closeIgnore(final Sequence[] s,final int start,int end) {
+        while(end != start) closeIgnore(s[--end]);
+    }
     
     CompoundSequence(final long[] subSizes,final Sequence[] data) {
         this.subSizes = subSizes;
         this.data = data;
+        for(final Sequence s : data) {
+            if(s.closeIsShared()) {
+                closeIsShared = true;
+                break;
+            }
+        }
+    }
+    CompoundSequence(final long[] subSizes,
+                     final Sequence[] data,
+                     final boolean closeIsShared) {
+        this.subSizes = subSizes;
+        this.data = data;
+        this.closeIsShared = closeIsShared;
     }
     
     @Override
@@ -129,17 +149,50 @@ class CompoundSequence implements Sequence {
                             final long r0,final long r1)
                             throws UncheckedIOException {
         final Sequence[] ndata = new Sequence[last - first + 1];
+        
+        int i = 0;
+        try {
+            ndata[i] = data[first].subSequence(r0,data[first].size());
+            for(int j = first;++j != last;) ndata[++i] = data[j].shallowCopy();
+            ndata[++i] = data[last].subSequence(0L,r1);
+        } catch(final UncheckedIOException e) {
+            closeIgnore(ndata,0,i);
+            throw e;
+        }
+        
+        return ndata;
+    }
+    static Sequence[] ndata(final Sequence[] data,
+                            final int first,final int last,
+                            final long r0,final long r1,
+                            final boolean closeIsShared)
+                            throws UncheckedIOException {
+        final Sequence[] ndata = new Sequence[last - first + 1];
         ndata[0] = data[first].subSequence(r0,data[first].size());
-        System.arraycopy(data,first + 1,ndata,1,last - first - 1);
-        ndata[ndata.length - 1] = data[last].subSequence(0L,r1);
+        if(closeIsShared) {
+            int i = 1;
+            try {for(int j = first;++j < last;++i) ndata[i] = data[j].shallowCopy();}
+            catch(final UncheckedIOException e) {closeIgnore(ndata,0,i); throw e;}
+        } else
+            System.arraycopy(
+                data,first + 1,
+                ndata,1,
+                last - first - 1
+            );
+        
+        try {ndata[last - first] = data[last].subSequence(0L,r1);}
+        catch(final UncheckedIOException e) {
+            if(closeIsShared) closeIgnore(ndata,0,last - first);
+            else closeIgnore(ndata[0]);
+            throw e;
+        }
         return ndata;
     }
     static long[] nss(final Sequence[] ndata,
                       final long lastSize,
                       final long[] subSizes,
                       final int first,
-                      final long r0,final long r1)
-                      throws UncheckedIOException {
+                      final long r0,final long r1) {
         final long[] nss = new long[ndata.length];
         {
             final long diff = r0 + (first == 0? 0L : subSizes[first - 1]);
@@ -152,13 +205,7 @@ class CompoundSequence implements Sequence {
         nss[nss.length - 1] -= lastSize - r1;
         return nss;
     }
-    static interface CSConstructor {Sequence construct(long[] nss,Sequence[] ndata);}
     CSConstructor constructor() {return CONSTRUCTOR;}
-    /**
-     * @implNote Since the sub-sequence operations of the sequences composing this
-     *           sequence are assumed to be efficient, there is no need to fiddle
-     *           around with index math.
-     */
     static Sequence internalSS(final Sequence[] data,final long[] subSizes,
                                final long start,final long end,
                                final CSConstructor constructor)
@@ -169,6 +216,26 @@ class CompoundSequence implements Sequence {
         if(first == last) return data[first].subSequence(r0,r1);
         
         final Sequence[] ndata = ndata(data,first,last,r0,r1);
+        final long[] nss = nss(ndata,data[last].size(),subSizes,first,r0,r1);
+        
+        return constructor.construct(nss,ndata);
+    }
+    /**
+     * @implNote Since the sub-sequence operations of the sequences composing this
+     *           sequence are assumed to be efficient, there is no need to fiddle
+     *           around with index math.
+     */
+    static Sequence internalSS(final Sequence[] data,final long[] subSizes,
+                               final long start,final long end,
+                               final boolean closeIsShared,
+                               final CSConstructor constructor)
+                               throws UncheckedIOException {
+        if(start == end) return EMPTY;
+        final int first = segment(start,subSizes),last = segment(end - 1,subSizes);
+        final long r0 = relative(start,first,subSizes),r1 = relative(end,last,subSizes);
+        if(first == last) return data[first].subSequence(r0,r1);
+        
+        final Sequence[] ndata = ndata(data,first,last,r0,r1,closeIsShared);
         final long[] nss = nss(ndata,data[last].size(),subSizes,first,r0,r1);
         
         return constructor.construct(nss,ndata);
@@ -186,7 +253,13 @@ class CompoundSequence implements Sequence {
                 "Range [%d,%d) is invalid."
                 .formatted(start,end)
             );
-        return start != 0L || end != size()? internalSS(data,subSizes,start,end,constructor())
+        return start != 0L || end != size()? internalSS(
+                                                 data,
+                                                 subSizes,
+                                                 start,end,
+                                                 closeIsShared,
+                                                 constructor()
+                                             )
                                            : this;
     }
     
@@ -461,7 +534,12 @@ class CompoundSequence implements Sequence {
                     "Range [%d,%d) is invalid."
                     .formatted(a,b)
                 );
-            return a != 0L || b != end? internalSS(data,subSizes,a,b,constructor)
+            return a != 0L || b != end? internalSS(
+                                            data,
+                                            subSizes,
+                                            a,b,
+                                            constructor
+                                        )
                                       : parent;
         }
         
@@ -839,7 +917,7 @@ class CompoundSequence implements Sequence {
     }
     
     @Override
-    public String toString() {
+    public String toString() throws UncheckedIOException {
         final StringBuilder out = new StringBuilder();
         // Get the index of the last segment, accounting for max string size.
         final int last = segment(Integer.MAX_VALUE,subSizes);
@@ -878,12 +956,25 @@ class CompoundSequence implements Sequence {
     @Override
     public MutableSequence mutableCopy() throws UncheckedIOException {
         final MutableSequence[] cpy = new MutableSequence[data.length];
-        for(int i = 0;i < cpy.length;++i) cpy[i] = data[i].mutableCopy();
-        return new MutableCompoundSequence(sscpy(subSizes),cpy);
+        {
+            int i = 0;
+            try {for(;i < cpy.length;++i) cpy[i] = data[i].mutableCopy();}
+            catch(final UncheckedIOException e) {closeIgnore(cpy,0,i); throw e;}
+        }
+        return new MutableCompoundSequence(sscpy(subSizes),cpy,closeIsShared);
     }
     @NoIO(suppresses = Suppresses.EXCEPTIONS) @Override
     public Sequence immutableCopy() {
-        // Data is already immutable, no need for further processing.
-        return new CompoundSequence(subSizes,data);
+        return closeIsShared? shallowCopy()
+                            : new CompoundSequence(subSizes,data,false);
+    }
+    @Override public boolean closeIsShared() {return closeIsShared;}
+    @Override
+    public Sequence shallowCopy() throws UncheckedIOException {
+        final Sequence[] s = new Sequence[data.length];
+        int i = 0;
+        try {for(;i < s.length;++i) s[i] = data[i].shallowCopy();}
+        catch(final UncheckedIOException e) {closeIgnore(s,0,i); throw e;}
+        return constructor().construct(subSizes,s);
     }
 }

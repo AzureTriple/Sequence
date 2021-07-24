@@ -14,6 +14,10 @@ class MutableCompoundSequence extends CompoundSequence implements MutableSequenc
     static final CSConstructor CONSTRUCTOR = (s,d) -> new MutableCompoundSequence(s,d);
     
     MutableCompoundSequence(final long[] subSizes,final Sequence[] data) {super(subSizes,data);}
+    MutableCompoundSequence(final long[] subSizes,final Sequence[] data,
+                            final boolean closeIsShared) {
+        super(subSizes,data,closeIsShared);
+    }
     
     @Override
     public MutableSequence set(final int index,final char c)
@@ -134,7 +138,7 @@ class MutableCompoundSequence extends CompoundSequence implements MutableSequenc
     public MutableSequence subSequence(final int start,final int end)
                                        throws IndexOutOfBoundsException,
                                               UncheckedIOException {
-        return (MutableSequence)super.subSequence(start,end);
+        return subSequence((long)start,(long)end);
     }
     @Override
     public MutableSequence subSequence(final long start,final long end)
@@ -157,13 +161,28 @@ class MutableCompoundSequence extends CompoundSequence implements MutableSequenc
                 "Range [%d,%d) is invalid."
                 .formatted(end,start)
             );
-        if(start == end) return EMPTY;
+        if(start == end) {close(); return EMPTY;}
         final int first = segment(start,subSizes),last = segment(end - 1,subSizes);
         final long r0 = relative(start,first,subSizes),r1 = relative(end,last,subSizes);
-        if(first == last) return ((MutableSequence)data[first]).mutableSubSequence(r0,r1);
+        if(first == last) {
+            final MutableSequence out = ((MutableSequence)data[first]).mutableSubSequence(r0,r1)
+                                                                      .mutableCopy();
+            try {close();}
+            catch(final UncheckedIOException e) {closeIgnore(out); throw e;}
+            return out;
+        }
         final long ls = data[last].size();
         
-        data = ndata(data,first,last,r0,r1);
+        data = ndata(data,first,last,r0,r1,closeIsShared);
+        if(closeIsShared) {
+            closeIsShared = false;
+            for(final Sequence s : data) {
+                if(s.closeIsShared()) {
+                    closeIsShared = true;
+                    break;
+                }
+            }
+        }
         subSizes = nss(data,ls,subSizes,first,r0,r1);
         return this;
     }
@@ -242,7 +261,15 @@ class MutableCompoundSequence extends CompoundSequence implements MutableSequenc
     @Override
     public Sequence immutableCopy() throws UncheckedIOException {
         final Sequence[] cpy = new Sequence[data.length];
-        for(int i = 0;i < cpy.length;++i) cpy[i] = data[i].immutableCopy();
-        return new CompoundSequence(sscpy(subSizes),cpy);
+        {
+            int i = 0;
+            try {for(;i < cpy.length;++i) cpy[i] = data[i].immutableCopy();}
+            catch(final UncheckedIOException e) {closeIgnore(cpy,0,i); throw e;}
+        }
+        return new CompoundSequence(sscpy(subSizes),cpy,closeIsShared);
+    }
+    @Override
+    public MutableSequence shallowCopy() throws UncheckedIOException {
+        return (MutableSequence)super.shallowCopy();
     }
 }

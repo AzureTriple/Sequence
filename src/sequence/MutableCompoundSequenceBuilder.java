@@ -46,7 +46,7 @@ public class MutableCompoundSequenceBuilder extends CompoundSequenceBuilder {
     }
     
     @Override
-    Sequence prepSequence(final Sequence in) {
+    Sequence prepSequence(final Sequence in) throws UncheckedIOException {
         // Make a copy even if already mutable to prevent external interference.
         return in.mutableCopy();
     }

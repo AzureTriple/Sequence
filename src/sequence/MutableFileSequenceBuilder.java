@@ -66,30 +66,35 @@ public class MutableFileSequenceBuilder extends FileSequenceBuilder {
         return this;
     }
     
-    FileSequence construct(File data,
+    FileSequence construct(final File data,
                            final long start,
                            final long end,
                            final long length,
                            final Charset cs)
                            throws IOException,SecurityException {
-        final String suffix;
-        {
-            final File tmp = Files.createTempFile(
-                MutableFileSequence.TMP_DIR.toPath(),
-                null,
-                ".%s.%s".formatted(Mutability.MUTABLE.toString(),suffix = data.getName())
-            ).toFile();
-            tmp.deleteOnExit();
+        final String suffix = data.getName();
+        final File tmp = Files.createTempFile(
+            MutableFileSequence.TMP_DIR.toPath(),
+            null,
+            ".%s.%s".formatted(Mutability.MUTABLE.toString(),suffix)
+        ).toFile();
+        tmp.deleteOnExit();
+        try {
             FixedSizeCharset.transfer(data,cs,tmp,MutableFileSequence.MUTABLE_CS);
-            data = tmp;
+            return new MutableFileSequence(
+                tmp,
+                start << 1,
+                end << 1,
+                length << 1,
+                suffix
+            );
+        } catch(UncheckedIOException|IOException e) {
+            try {tmp.delete();}
+            catch(final SecurityException e1) {}
+            if(e instanceof UncheckedIOException)
+                throw ((UncheckedIOException)e).getCause();
+            throw e;
         }
-        return new MutableFileSequence(
-            data,
-            start << 1,
-            end << 1,
-            length << 1,
-            suffix
-        );
     }
     @Override
     public MutableSequence build() throws IllegalArgumentException,

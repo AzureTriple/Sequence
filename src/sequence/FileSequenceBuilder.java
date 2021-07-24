@@ -49,7 +49,7 @@ public class FileSequenceBuilder implements SequenceBuilder {
      * @return <code>this</code>
      */
     public FileSequenceBuilder data(final String data) {
-        this.data = new File(data);
+        this.data = data == null? null : new File(data);
         return this;
     }
     /**
@@ -127,35 +127,40 @@ public class FileSequenceBuilder implements SequenceBuilder {
         return this;
     }
     
-    FileSequence construct(File data,
+    FileSequence construct(final File data,
                            final long start,
                            final long end,
                            final long length,
                            final Charset cs)
                            throws IOException,SecurityException {
         final Mutability mut = Mutability.IMMUTABLE;
-        final FixedSizeCharset fscs;
-        final String suffix;
+        final String suffix = data.getName();
         // Make temporary file which contains characters with a fixed size.
-        {
-            final File tmp = Files.createTempFile(
-                FileSequence.TMP_DIR.toPath(),
-                null,
-                ".%s.%s".formatted(mut.toString(),suffix = data.getName())
-            ).toFile();
-            tmp.deleteOnExit();
-            fscs = FixedSizeCharset.transfer(data,tmp,cs);
-            data = tmp;
+        final File tmp = Files.createTempFile(
+            FileSequence.TMP_DIR.toPath(),
+            null,
+            ".%s.%s".formatted(mut.toString(),suffix)
+        ).toFile();
+        tmp.deleteOnExit();
+        try {
+            final FixedSizeCharset fscs = FixedSizeCharset.transfer(data,tmp,cs);
+            
+            return new FileSequence(
+                tmp,
+                start * fscs.size,
+                end * fscs.size,
+                length * fscs.size,
+                mut,
+                suffix,
+                fscs
+            );
+        } catch(UncheckedIOException|IOException|SecurityException e) {
+            try {tmp.delete();}
+            catch(final SecurityException e1) {}
+            if(e instanceof UncheckedIOException)
+                throw ((UncheckedIOException)e).getCause();
+            throw e;
         }
-        return new FileSequence(
-            data,
-            start * fscs.size,
-            end * fscs.size,
-            length * fscs.size,
-            mut,
-            suffix,
-            fscs
-        );
     }
     /**
      * @throws IllegalArgumentException The indices are outside the input data or

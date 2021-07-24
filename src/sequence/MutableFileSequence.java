@@ -317,14 +317,31 @@ class MutableFileSequence extends FileSequence implements MutableSequence {
         try(final BufferedInputStream I = new BufferedInputStream(new FileInputStream(file));
             final BufferedOutputStream O = new BufferedOutputStream(new FileOutputStream(nf))) {
             I.transferTo(O);
-        } catch(IOException|SecurityException e) {throw ioe(e);}
-        return new MutableFileSequence(nf,start,end,length,suffix);
+            return new MutableFileSequence(nf,start,end,length,suffix);
+        } catch(UncheckedIOException|IOException|SecurityException e) {
+            nf.delete();
+            throw ioe(e);
+        }
     }
     @Override
     public Sequence immutableCopy() throws UncheckedIOException {
-        final File nf; final FixedSizeCharset fscs;
-        try {fscs = FixedSizeCharset.transfer(file,nf = tmpFile(Mutability.IMMUTABLE),MUTABLE_CS);}
-        catch(IOException|SecurityException e) {throw ioe(e);}
-        return new FileSequence(nf,start,end,length,Mutability.IMMUTABLE,suffix,fscs);
+        final File nf = tmpFile(Mutability.IMMUTABLE);
+        try {
+            return new FileSequence(
+                nf,
+                start,end,length,
+                Mutability.IMMUTABLE,
+                suffix,
+                FixedSizeCharset.transfer(file,nf,MUTABLE_CS)
+            );
+        } catch(UncheckedIOException|IOException|SecurityException e) {
+            try {nf.delete();}
+            catch(final SecurityException e1) {}
+            throw ioe(e);
+        }
+    }
+    @Override
+    public MutableSequence shallowCopy() throws UncheckedIOException {
+        return new MutableFileSequence(file,start,end,length,suffix);
     }
 }
