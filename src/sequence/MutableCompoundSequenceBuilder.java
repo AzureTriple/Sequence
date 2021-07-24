@@ -1,5 +1,6 @@
 package sequence;
 
+import java.io.UncheckedIOException;
 import sequence.CompoundSequence.CSConstructor;
 
 /**
@@ -19,4 +20,9 @@ public class MutableCompoundSequenceBuilder extends CompoundSequenceBuilder {
         return in.mutableCopy();
     }
     @Override CSConstructor constructor() {return MutableCompoundSequence.CONSTRUCTOR;}
+    @Override
+    public MutableSequence build() throws IllegalArgumentException,
+                                          UncheckedIOException {
+        return (MutableSequence)super.build();
+    }
 }
