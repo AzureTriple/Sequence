@@ -16,6 +16,7 @@ import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.RandomAccessFile;
 import java.io.UncheckedIOException;
+import java.lang.ref.Cleaner.Cleanable;
 import java.nio.file.Files;
 import java.nio.file.Paths;
 import util.FixedSizeCharset;
@@ -60,19 +61,42 @@ class FileSequence implements Sequence {
         return ioe(e instanceof IOException? (IOException)e : new IOException(e));
     }
     
-    String suffix;
-    File file;
-    RandomAccessFile data;
+    static final class fscleaner implements Runnable {
+        RandomAccessFile data;
+        Exception e = null;
+        fscleaner(final RandomAccessFile data) {this.data = data;}
+        @Override
+        public void run() {
+            if(data != null) {
+                try {data.close();}
+                catch(final Exception e) {this.e = e;}
+            }
+        }
+    }
+    private final Cleanable cleanable;
+    final fscleaner fsc;
+    final String suffix;
+    final File file;
+    final RandomAccessFile data;
     FixedSizeCharset cs;
     long start,end,length; // Measured in bytes.
-    boolean big;
+    final boolean big;
     final Mutability mutability;
     
     FileSequence(final File file,final long start,final long end,final long length,
                  final Mutability mutability,final String suffix,final FixedSizeCharset cs)
                  throws UncheckedIOException {
-        try {data = new RandomAccessFile(this.file = file,(this.mutability = mutability).mode);}
-        catch(FileNotFoundException|SecurityException e) {throw ioe(e);}
+        try {
+            cleanable = CleaningUtil.register(
+                this,
+                fsc = new fscleaner(
+                    data = new RandomAccessFile(
+                        this.file = file,
+                        (this.mutability = mutability).mode
+                    )
+                )
+            );
+        } catch(FileNotFoundException|SecurityException e) {throw ioe(e);}
         this.start = start;
         this.length = length;
         this.end = end;
@@ -169,7 +193,7 @@ class FileSequence implements Sequence {
             );
         return start != end? start != this.start || end != this.end
                 ? new FileSequence(file,start,end,end - start,mutability,suffix,cs)
-                : this
+                : shallowCopy()
                 : EMPTY;
               
     }
@@ -179,6 +203,8 @@ class FileSequence implements Sequence {
      * file.
      */
     private static class SFSI implements SimpleSequenceIterator {
+        final Cleanable cleanable;
+        final fscleaner sfsc;
         // Indices are measured in characters.
         final RandomAccessFile data;
         final long start,end;
@@ -188,7 +214,12 @@ class FileSequence implements Sequence {
         SFSI(final FileSequence parent) throws UncheckedIOException {
             // Create new view of the data to prevent interference.
             try {
-                data = new RandomAccessFile(parent.file,"r");
+                cleanable = CleaningUtil.register(
+                    this,
+                    sfsc = new fscleaner(
+                        data = new RandomAccessFile(parent.file,"r")
+                    )
+                );
                 data.seek(start = parent.start);
             } catch(IOException|SecurityException e) {throw ioe(e);}
             end = parent.size();
@@ -250,8 +281,8 @@ class FileSequence implements Sequence {
         @Override
         public void close() throws UncheckedIOException {
             cursor = end;
-            try {data.close();}
-            catch(final IOException e) {throw ioe(e);}
+            cleanable.clean();
+            if(sfsc.e != null) throw ioe(sfsc.e);
         }
     }
     /**@implNote See note in {@linkplain Sequence#iterator()}.*/
@@ -259,6 +290,8 @@ class FileSequence implements Sequence {
     
     /**A {@linkplain SequenceIterator} view of the characters stored in a file.*/
     static abstract class FSI implements SequenceIterator {
+        private final Cleanable cleanable;
+        final fscleaner fsic;
         // Indices are measured in bytes.
         final String suffix;
         final long start,end,lastIdx;
@@ -273,7 +306,14 @@ class FileSequence implements Sequence {
         FSI(final long begin,final long end,final FileSequence fs)
             throws UncheckedIOException {
             // Create new view of the data to prevent interference.
-            try {data = new RandomAccessFile(fs.file,fs.mutability.mode);}
+            try {
+                cleanable = CleaningUtil.register(
+                    this,
+                    fsic = new fscleaner(
+                        data = new RandomAccessFile(fs.file,fs.mutability.mode)
+                    )
+                );
+            }
             catch(FileNotFoundException|SecurityException e) {throw ioe(e);}
             cursor = mark = begin;
             lastIdx = end;
@@ -379,6 +419,20 @@ class FileSequence implements Sequence {
             return iNNWS(skipidx(limit));
         }
         
+        abstract boolean iFind(final long limit,final char c) throws UncheckedIOException;
+        @Override
+        public boolean find(final char c) throws UncheckedIOException {
+            return iFind(lastIdx,c);
+        }
+        @Override
+        public boolean find(final int limit,final char c) throws UncheckedIOException {
+            return iFind(skipidx(limit),c);
+        }
+        @Override
+        public boolean find(final long limit,final char c) throws UncheckedIOException {
+            return iFind(skipidx(limit),c);
+        }
+        
         @Override public SequenceIterator mark() throws IndexOutOfBoundsException {return mark(0L);}
         @Override public SequenceIterator mark(final int offset) throws IndexOutOfBoundsException {return mark((long)offset);}
         @Override public abstract SequenceIterator mark(long offset) throws IndexOutOfBoundsException;
@@ -421,7 +475,7 @@ class FileSequence implements Sequence {
                 );
             return a != b? a != start || b != end
                     ? new FileSequence(file,a,b,b - a,parent.mutability,suffix,cs)
-                    : parent
+                    : parent.shallowCopy()
                     : EMPTY;
         }
         
@@ -440,8 +494,8 @@ class FileSequence implements Sequence {
         
         @Override
         public void close() throws UncheckedIOException {
-            try {data.close();}
-            catch(final IOException e) {throw ioe(e);}
+            cleanable.clean();
+            if(fsic.e != null) throw ioe(fsic.e);
         }
     }
     /**Forward File Sequence Iterator*/
@@ -534,6 +588,26 @@ class FileSequence implements Sequence {
                 } catch(final IOException e) {throw ioe(e);}
             }
             return null;
+        }
+        @Override
+        boolean iFind(final long limit,final char c) throws UncheckedIOException {
+            if(cursor < limit) {
+                try {
+                    data.seek(cursor);
+                    if(big) {
+                        do {
+                            cursor += 2L;
+                            if(data.readChar() == c) return true;
+                        } while(cursor != limit);
+                    } else {
+                        do {
+                            ++cursor;
+                            if(data.read() == c) return true;
+                        } while(cursor != limit);
+                    }
+                } catch(final IOException e) {throw ioe(e);}
+            }
+            return false;
         }
         
         @Override
@@ -646,6 +720,26 @@ class FileSequence implements Sequence {
             }
             return null;
         }
+        @Override
+        boolean iFind(final long limit,final char c) throws UncheckedIOException {
+            if(cursor > limit) {
+                try {
+                    if(big) {
+                        do {
+                            data.seek(cursor);
+                            cursor -= 2L;
+                            if(data.readChar() == c) return true;
+                        } while(cursor != limit);
+                    } else {
+                        do {
+                            data.seek(cursor--);
+                            if(data.read() == c) return true;
+                        } while(cursor != limit);
+                    }
+                } catch(final IOException e) {throw ioe(e);}
+            }
+            return false;
+        }
         
         @Override
         public SequenceIterator mark(final long offset) throws IndexOutOfBoundsException {
@@ -677,8 +771,8 @@ class FileSequence implements Sequence {
     
     @Override
     public void close() throws UncheckedIOException {
-        try {data.close();}
-        catch(final IOException e) {throw ioe(e);}
+        cleanable.clean();
+        if(fsc.e != null) throw ioe(fsc.e);
     }
     
     @Override
@@ -737,8 +831,8 @@ class FileSequence implements Sequence {
     public Sequence immutableCopy() throws UncheckedIOException {
         final File nf = tmpFile(Mutability.IMMUTABLE);
         // Immutable file sequence is already in it's minimal form, don't need to re-encode.
-        try(final BufferedInputStream I = new BufferedInputStream(new FileInputStream(file));
-            final BufferedOutputStream O = new BufferedOutputStream(new FileOutputStream(nf))) {
+        try(BufferedInputStream I = new BufferedInputStream(new FileInputStream(file));
+            BufferedOutputStream O = new BufferedOutputStream(new FileOutputStream(nf))) {
             I.transferTo(O);
             return new FileSequence(nf,start,end,length,Mutability.IMMUTABLE,suffix,cs);
         } catch(UncheckedIOException|IOException|SecurityException e) {

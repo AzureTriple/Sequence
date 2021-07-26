@@ -8,6 +8,7 @@ import java.util.NoSuchElementException;
 import java.util.function.Consumer;
 
 import java.io.UncheckedIOException;
+import java.lang.ref.Cleaner.Cleanable;
 import util.NoIO;
 import util.NoIO.Suppresses;
 
@@ -20,6 +21,22 @@ class CompoundSequence implements Sequence {
     static interface CSConstructor {Sequence construct(long[] nss,Sequence[] ndata);}
     static final CSConstructor CONSTRUCTOR = (s,d) -> new CompoundSequence(s,d);
     
+    protected static final class cscleaner implements Runnable {
+        Sequence[] data;
+        Exception e = null;
+        cscleaner(final Sequence[] data) {this.data = data;}
+        @Override
+        public void run() {
+            if(data != null) {
+                for(final Sequence s : data) {
+                    try {s.close();}
+                    catch(final Exception e) {this.e = e;}
+                }
+            }
+        }
+    }
+    private final Cleanable cleanable;
+    final cscleaner csc;
     Sequence[] data;
     /**Holds the total size of all sequences before and at each index.*/
     long[] subSizes;
@@ -39,6 +56,7 @@ class CompoundSequence implements Sequence {
                 break;
             }
         }
+        cleanable = CleaningUtil.register(this,csc = new cscleaner(data));
     }
     CompoundSequence(final long[] subSizes,
                      final Sequence[] data,
@@ -46,6 +64,7 @@ class CompoundSequence implements Sequence {
         this.subSizes = subSizes;
         this.data = data;
         this.closeIsShared = closeIsShared;
+        cleanable = CleaningUtil.register(this,csc = new cscleaner(data));
     }
     
     @Override
@@ -260,11 +279,26 @@ class CompoundSequence implements Sequence {
                                                  closeIsShared,
                                                  constructor()
                                              )
-                                           : this;
+                                           : shallowCopy();
     }
     
     /**Simple Compound Sequence Iterator*/
     private static class SCSI implements SimpleSequenceIterator {
+        static final class ssicleaner implements Runnable {
+            SimpleSequenceIterator itr;
+            Exception e = null;
+            public ssicleaner(final SimpleSequenceIterator itr) {this.itr = itr;}
+            @Override
+            public void run() {
+                if(itr != null) {
+                    try {itr.close();}
+                    catch(final Exception e) {this.e = e;}
+                }
+            }
+            
+        }
+        final Cleanable cleanable;
+        final ssicleaner ssic;
         int segment;
         final long end;
         long cursor = 0L;
@@ -277,9 +311,16 @@ class CompoundSequence implements Sequence {
                 itr = null;
                 subSizes = null;
                 data = null;
+                cleanable = null;
+                ssic = null;
             } else {
                 segment = segment(cursor,subSizes = parent.subSizes);
-                itr = (data = parent.data)[segment].iterator();
+                cleanable = CleaningUtil.register(
+                    this,
+                    ssic = new ssicleaner(
+                        itr = (data = parent.data)[segment].iterator()
+                    )
+                );
                 itr.skip(relative(cursor,segment,subSizes));
             }
         }
@@ -303,7 +344,7 @@ class CompoundSequence implements Sequence {
             final int nSegment = segment(cursor += count,subSizes);
             if(segment != nSegment) {
                 itr.close();
-                itr = data[segment = nSegment].iterator();
+                ssic.itr = itr = data[segment = nSegment].iterator();
                 itr.skip(relative(cursor,segment,subSizes));
             } else itr.skip(count);
             return this;
@@ -322,7 +363,7 @@ class CompoundSequence implements Sequence {
             if(!hasNext()) throw new NoSuchElementException();
             if(!itr.hasNext()) {
                 itr.close();
-                itr = data[++segment].iterator();
+                ssic.itr = itr = data[++segment].iterator();
             }
             ++cursor;
             return itr.next();
@@ -333,10 +374,10 @@ class CompoundSequence implements Sequence {
             if(action == null) return;
             if(itr != null) {
                 itr.forEachRemaining(action);
-                itr = null;
+                ssic.itr = itr = null;
                 final int lastSegment = segment(end - 1L,subSizes);
                 while(++segment <= lastSegment) {
-                    try(final SimpleSequenceIterator i = data[segment].iterator()) {
+                    try(SimpleSequenceIterator i = data[segment].iterator()) {
                         i.forEachRemaining(action);
                     }
                 }
@@ -346,7 +387,8 @@ class CompoundSequence implements Sequence {
         @Override
         public void close() throws UncheckedIOException {
             cursor = end;
-            if(itr != null) {itr.close(); itr = null;}
+            cleanable.clean();
+            if(ssic.e != null) throw ioe(ssic.e);
         }
     }
     @Override public SimpleSequenceIterator iterator() throws UncheckedIOException {return new SCSI(this);}
@@ -356,6 +398,20 @@ class CompoundSequence implements Sequence {
      * consecutive sequences.
      */
     static abstract class CSI implements SequenceIterator {
+        static final class csicleaner implements Runnable {
+            SequenceIterator itr;
+            Exception e = null;
+            csicleaner(final SequenceIterator itr) {this.itr = itr;}
+            @Override
+            public void run() {
+                if(itr != null) {
+                    try {itr.close();}
+                    catch(final Exception e) {this.e = e;}
+                }
+            }
+        }
+        private final Cleanable cleanable;
+        final csicleaner csic;
         final Sequence[] data;
         final long[] subSizes;
         final long end,lastIdx;
@@ -378,7 +434,12 @@ class CompoundSequence implements Sequence {
             this.end = parent.size();
             this.parent = parent;
             lastIdx = end;
-            itr = getItr(data[segment = segment(cursor = mark = begin,subSizes)]);
+            cleanable = CleaningUtil.register(
+                this,
+                csic = new csicleaner(
+                    itr = getItr(data[segment = segment(cursor = mark = begin,subSizes)])
+                )
+            );
             this.constructor = parent.constructor();
         }
         
@@ -467,6 +528,11 @@ class CompoundSequence implements Sequence {
             return iNNWS(skipidx(limit));
         }
         
+        abstract boolean iFind(final long limit,final char c) throws UncheckedIOException;
+        @Override public boolean find(final char c) {return iFind(lastIdx,c);}
+        @Override public boolean find(final int limit,final char c) {return iFind(skipidx(limit),c);}
+        @Override public boolean find(final long limit,final char c) {return iFind(skipidx(limit),c);}
+        
         @Override
         public SequenceIterator mark() throws IndexOutOfBoundsException {
             return mark(0L);
@@ -483,7 +549,7 @@ class CompoundSequence implements Sequence {
                 final int ns = segment(cursor = nc,subSizes);
                 if(ns != segment) {
                     if(itr != null) itr.close();
-                    itr = getItr(data[segment = ns]);
+                    csic.itr = itr = getItr(data[segment = ns]);
                 }
             }
             // (itr == null) == (segment == data.length)
@@ -549,7 +615,11 @@ class CompoundSequence implements Sequence {
             return itr != null? fullStrings(itr.toString()) : "";
         }
         
-        @Override public void close() throws UncheckedIOException {if(itr != null) itr.close();}
+        @Override
+        public void close() throws UncheckedIOException {
+            cleanable.clean();
+            if(csic.e != null) throw ioe(csic.e);
+        }
     }
     /**Forward Compound Sequence Iterator*/
     static class FCSI extends CSI {
@@ -565,8 +635,8 @@ class CompoundSequence implements Sequence {
         }
         void nextSegment() throws UncheckedIOException {
             itr.close();
-            itr = ++segment != data.length? getItr(data[segment])
-                                          : null;
+            csic.itr = itr = ++segment != data.length? getItr(data[segment])
+                                                     : null;
         }
         @Override
         SequenceIterator getItr(final Sequence segment) throws UncheckedIOException {
@@ -610,7 +680,7 @@ class CompoundSequence implements Sequence {
             // Iterate through all other segments.
             for(int s = segment + 1;s < data.length;++s) {
                 final Character c;
-                try(final SequenceIterator i = getItr(data[s])) {
+                try(SequenceIterator i = getItr(data[s])) {
                     c = i.skipWS(limit);
                     limit -= i.offset();
                 }
@@ -690,9 +760,38 @@ class CompoundSequence implements Sequence {
             }
             return null;
         }
+        @Override
+        boolean iFind(final long limit,final char c) throws UncheckedIOException {
+            if(cursor < limit) {
+                // limit <= end (capped by skipidx)
+                // cursor < limit (above condition)
+                // -> cursor < end
+                // Methods which modify the cursor are sync'd w/ the segment index
+                // -> segment < data.length
+                // itr != null Q.E.D.
+                
+                // Subtract the iterator's offset so that the loop always adds
+                // the number of skipped characters to the cursor.
+                cursor -= itr.offset();
+                do {
+                    // The limit relative to the iterator's starting position
+                    // is the same as the limit relative to the cursor, since
+                    // the cursor is always at the absolute position of this
+                    // segment's start.
+                    final boolean b = itr.find(limit - cursor,c);
+                    // Add the number of characters skipped.
+                    cursor += itr.offset();
+                    // Check exit conditions.
+                    if(b || cursor == limit) return b;
+                    // Move on to the next segment, if any.
+                    nextSegment();
+                } while(segment != data.length);
+            }
+            return false;
+        } 
         
         @Override
-        public FCSI mark(final long offset) throws IndexOutOfBoundsException {
+        public SequenceIterator mark(final long offset) throws IndexOutOfBoundsException {
             if(oob(mark = offset(offset)) && mark != end)
                 throw new IndexOutOfBoundsException(
                     "Cannot mark index %d (range: [0,%d],input: %d)."
@@ -711,10 +810,12 @@ class CompoundSequence implements Sequence {
             final int last = segment(Integer.MAX_VALUE,subSizes);
             for(int i = segment;++i < last;) out.append(data[i]);
             final long diff = Integer.MAX_VALUE - out.length();
-            return out.append(
-                diff < data[last].size()? data[last].subSequence(0L,diff)
-                                        : data[last]
-            ).toString();
+            if(diff < data[last].size()) {
+                try(Sequence ss = data[last].subSequence(0L,diff)) {
+                    out.append(ss);
+                }
+            } else out.append(data[last]);
+            return out.toString();
         }
     }
     /**Reverse Compound Sequence Iterator*/
@@ -731,8 +832,8 @@ class CompoundSequence implements Sequence {
         }
         void nextSegment() throws UncheckedIOException {
             itr.close();
-            itr = --segment != -1? getItr(data[segment])
-                                 : null;
+            csic.itr = itr = --segment != -1? getItr(data[segment])
+                                            : null;
         }
         @Override
         SequenceIterator getItr(final Sequence segment) throws UncheckedIOException {
@@ -777,7 +878,7 @@ class CompoundSequence implements Sequence {
             // Iterate through all other segments.
             for(int s = segment - 1;s > 0;--s) {
                 final Character c;
-                try(final SequenceIterator i = getItr(data[s])) {
+                try(SequenceIterator i = getItr(data[s])) {
                     c = i.skipWS(limit - vcursor + data[s].size());
                     vcursor -= i.offset();
                 }
@@ -851,9 +952,38 @@ class CompoundSequence implements Sequence {
             }
             return null;
         }
+        @Override
+        boolean iFind(final long limit,final char c) throws UncheckedIOException {
+            if(cursor > limit) {
+                // limit >= -1 (capped by skipidx)
+                // cursor > limit (above condition)
+                // -> cursor > -1
+                // Methods which modify the cursor are sync'd w/ the segment index
+                // -> segment > -1
+                // itr != null Q.E.D.
+                
+                // Add the iterator's offset so that the loop always subtracts 
+                // the number of skipped characters from the cursor.
+                cursor += itr.offset();
+                do {
+                    // The limit relative to the iterator's ending position is
+                    // the same as the limit relative to the sequence's start,
+                    // since the cursor is always at the absolute position of
+                    // this segment's end.
+                    final boolean b = itr.find(limit - cursor + itr.getParent().size() - 1L,c);
+                    // Subtract the number of characters skipped.
+                    cursor -= itr.offset();
+                    // Check exit conditions.
+                    if(b || cursor == limit) return b;
+                    // Move on to the next segment, if any.
+                    nextSegment();
+                } while(segment != -1);
+            }
+            return false;
+        }
         
         @Override
-        public RCSI mark(final long offset) throws IndexOutOfBoundsException {
+        public SequenceIterator mark(final long offset) throws IndexOutOfBoundsException {
             if(oob(mark = offset(offset)) && mark != -1L)
                 throw new IndexOutOfBoundsException(
                     "Cannot mark index %d (range: [0,%d],input: %d)."
@@ -871,21 +1001,22 @@ class CompoundSequence implements Sequence {
             final StringBuilder out;
             {
                 final long diff = subSizes[segment - 1] - Integer.MAX_VALUE + current.length();
-                first = segment != 0? 1 + segment(diff,subSizes)
-                                              : 1;
-                out = new StringBuilder(
-                    diff > 0L? data[first - 1].subSequence(
-                                   relative(
-                                       diff,
-                                       first - 1,
-                                       subSizes
-                                   ),
-                                   data[first - 1].size()
-                               )
-                             : data[first - 1]
-                );
+                first = segment != 0? segment(diff,subSizes)
+                                    : 0;
+                if(diff > 0L) {
+                    try(
+                        Sequence ss = data[first].subSequence(
+                            relative(
+                                diff,
+                                first,
+                                subSizes
+                            ),
+                            data[first].size()
+                       )
+                    ) {out = new StringBuilder(ss);}
+                } else out = new StringBuilder(data[first]);
             }
-            for(int i = first;i < segment;++i) out.append(data[i]);
+            for(int i = first + 1;i < segment;++i) out.append(data[i]);
             return out.append(current).toString();
         }
     }
@@ -907,13 +1038,8 @@ class CompoundSequence implements Sequence {
      */
     @Override
     public void close() throws UncheckedIOException {
-        UncheckedIOException except = null;
-        for(final Sequence s : data) {
-            try {s.close();}
-            catch(final UncheckedIOException e) {except = e;}
-            catch(final Exception e) {except = ioe(e);}
-        }
-        if(except != null) throw except;
+        cleanable.clean();
+        if(csc.e != null) throw ioe(csc.e);
     }
     
     @Override
@@ -923,10 +1049,12 @@ class CompoundSequence implements Sequence {
         final int last = segment(Integer.MAX_VALUE,subSizes);
         for(int i = 0;i < last;++i) out.append(data[i]);
         final long diff = Integer.MAX_VALUE - out.length();
-        return out.append(
-            diff < data[last].size()? data[last].subSequence(0L,diff)
-                                    : data[last]
-        ).toString();
+        if(diff < data[last].size()) {
+            try(Sequence ss = data[last].subSequence(0L,diff)) {
+                out.append(ss);
+            }
+        } else out.append(data[last]);
+        return out.toString();
     }
     
     @Override

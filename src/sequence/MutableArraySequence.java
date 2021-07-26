@@ -89,6 +89,27 @@ class MutableArraySequence extends ArraySequence implements MutableSequence {
         return subSequence((int)start,(int)end);
     }
     @NoIO @Override
+    public MutableSequence copySubSequence(int start,int end)
+                                           throws IndexOutOfBoundsException,
+                                                  UncheckedIOException {
+        if((end = ssidx(end)) < (start = ssidx(start)))
+            throw new IndexOutOfBoundsException(
+                "Invalid range: [%d,%d)"
+                .formatted(end,start)
+            );
+        if(start == end) return EMPTY;
+        final int l = end - start;
+        final char[] ndata = new char[l];
+        System.arraycopy(data,start,ndata,0,l);
+        return new MutableArraySequence(ndata,0,l,l);
+    }
+    @NoIO @Override
+    public MutableSequence copySubSequence(final long start,final long end)
+                                           throws IndexOutOfBoundsException,
+                                                  UncheckedIOException {
+        return copySubSequence((int)start,(int)end);
+    }
+    @NoIO @Override
     public MutableSequence mutableSubSequence(int start,int end)
                                               throws IndexOutOfBoundsException {
         if((end = ssidx(end)) < (start = ssidx(start)))
@@ -130,6 +151,10 @@ class MutableArraySequence extends ArraySequence implements MutableSequence {
         @NoIO @Override public Character nextNonWS() {return super.nextNonWS();}
         @NoIO @Override public Character nextNonWS(final int limit) {return super.nextNonWS(limit);}
         @NoIO @Override public Character nextNonWS(final long limit) {return super.nextNonWS(limit);}
+        
+        @NoIO @Override public boolean find(final char c) {return super.find(c);}
+        @NoIO @Override public boolean find(final int limit,final char c) {return super.find(limit,c);}
+        @NoIO @Override public boolean find(final long limit,final char c) {return super.find(limit,c);}
         
         @NoIO @Override
         public MutableSequenceIterator jumpTo(final int index) throws IndexOutOfBoundsException {

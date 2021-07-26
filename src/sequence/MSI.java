@@ -48,6 +48,10 @@ abstract class MSI<I extends SequenceIterator> implements MutableSequenceIterato
     @Override public Character nextNonWS(final int limit) throws UncheckedIOException {return sooper.nextNonWS(limit);}
     @Override public Character nextNonWS(final long limit) throws UncheckedIOException {return sooper.nextNonWS(limit);}
     
+    @Override public boolean find(final char c) throws UncheckedIOException {return sooper.find(c);}
+    @Override public boolean find(final int limit,final char c) throws UncheckedIOException {return sooper.find(limit,c);}
+    @Override public boolean find(final long limit,final char c) throws UncheckedIOException {return sooper.find(limit,c);}
+    
     @Override
     public MutableSequenceIterator mark() {
         sooper.mark();

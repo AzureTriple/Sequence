@@ -1,6 +1,8 @@
 package test;
 
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNull;
+import static org.junit.Assert.assertTrue;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
@@ -39,8 +41,7 @@ final class TestUtils {
         if(before) data.append(b);
         for(final appender app : appenders) app.append(b);
         if(!before) data.append(b);
-        final Sequence as = b.build();
-        streq(a,as);
+        try(Sequence as = b.build()) {streq(a,as);}
     }
     static void buildeq(final String a,final SequenceBuilder b,
                         final appender data,final appender...appenders) {
@@ -78,7 +79,9 @@ final class TestUtils {
                   end = getTestBuilderEnd(),
                   length = getTestBuilderLength();
         
-        streq(test,DATA.append(p.provide()).build());
+        try(Sequence s = DATA.append(p.provide()).build()) {
+            streq(test,s);
+        }
         
         buildeq(test.substring(start),p.provide(),DATA,START);
         buildeq(test.substring(start),p.provide(),DATA,FAKE_START,START);
@@ -125,7 +128,9 @@ final class TestUtils {
     
     static String getLengthString() {return getTestBuilderString();}
     static void length(final provider p,final appender DATA) {
-        assertEquals(getLengthString().length(),DATA.append(p.provide()).build().size());
+        try(Sequence s = DATA.append(p.provide()).build()) {
+            assertEquals(getLengthString().length(),s.size());
+        }
     }
     
     static String getCharAtString() {return getTestBuilderString();}
@@ -133,8 +138,7 @@ final class TestUtils {
     static int getCharAtEnd() {return getTestBuilderEnd();}
     static void charAt(final provider p,final appender DATA,final appender START,final appender END) {
         final char[] arr = getCharAtString().toCharArray();
-        {
-            final Sequence a = DATA.append(p.provide()).build();
+        try(Sequence a = DATA.append(p.provide()).build()) {
             for(int i = 0;i < arr.length;++i) {
                 assertEquals(arr[i],a.charAt(i),"a[%d]".formatted(i));
                 assertEquals(arr[i],a.charAt((long)i),"a[%dL]".formatted(i));
@@ -149,9 +153,8 @@ final class TestUtils {
             assertThrows(IndexOutOfBoundsException.class,() -> a.charAt((long)-arr.length - 1L));
         }
         
-        {
+        try(Sequence b = START.append(END.append(DATA.append(p.provide()))).build()) {
             final int start = getCharAtStart(),end = getCharAtEnd();
-            final Sequence b = START.append(END.append(DATA.append(p.provide()))).build();
             for(int i = start;i < end;++i) {
                 assertEquals(arr[i],b.charAt(i - start),"b[%d]".formatted(i - start));
                 assertEquals(arr[i],b.charAt((long)(i - start)),"b[%dL]".formatted(i - start));
@@ -169,13 +172,13 @@ final class TestUtils {
     
     static String getSubSequenceString() {return getTestBuilderString();}
     private static void ssbase(final String s,final Sequence a,final int x,final int y) {
-        streq(s,a.subSequence(0,s.length()));
-        streq(s.substring(0,s.length() - 1),a.subSequence(0,-1));
-        streq(s.substring(x,y),a.subSequence(x,y));
+        try(Sequence ss = a.subSequence(0,s.length())) {streq(s,ss);}
+        try(Sequence ss = a.subSequence(0,-1)) {streq(s.substring(0,s.length() - 1),ss);}
+        try(Sequence ss = a.subSequence(x,y)) {streq(s.substring(x,y),ss);}
 
-        streq(s,a.subSequence(0L,(long)s.length()));
-        streq(s.substring(0,s.length() - 1),a.subSequence(0L,-1L));
-        streq(s.substring(x,y),a.subSequence((long)x,(long)y));
+        try(Sequence ss = a.subSequence(0L,(long)s.length())) {streq(s,ss);}
+        try(Sequence ss = a.subSequence(0L,-1L)) {streq(s.substring(0,s.length() - 1),ss);}
+        try(Sequence ss = a.subSequence((long)x,(long)y)) {streq(s.substring(x,y),ss);}
         
         assertThrows(IndexOutOfBoundsException.class,() -> a.subSequence(0,s.length() + 1));
         assertThrows(IndexOutOfBoundsException.class,() -> a.subSequence(0,-s.length() - 1));
@@ -198,14 +201,13 @@ final class TestUtils {
         assertThrows(IndexOutOfBoundsException.class,() -> a.subSequence(1L,0L));
     }
     static void subSequence(final provider p,final appender DATA) {
-        final Sequence a = DATA.append(p.provide()).build();
-        final String str = getSubSequenceString();
-        ssbase(str,a,5,10);
-        ssbase(
-            str.substring(1,5),
-            a.subSequence(1,5),
-            2,4
-        );
+        try(Sequence a = DATA.append(p.provide()).build()) {
+            final String str = getSubSequenceString();
+            ssbase(str,a,5,10);
+            try(Sequence b = a.subSequence(1,5)) {
+                ssbase(str.substring(1,5),b,2,4);
+            }
+        }
     }
     
     static String getSimpleItrString() {return getTestBuilderString();}
@@ -231,12 +233,13 @@ final class TestUtils {
         }
     }
     static void iterator(final provider p,final appender DATA) {
-        final Sequence a = DATA.append(p.provide()).build();
         final String str = getSimpleItrString();
         final int x = 5,y = 10;
-        itrbase(str,a);
-        itrbase(str.substring(x,y),
-            a.subSequence(x,y));
+        try(Sequence a = DATA.append(p.provide()).build();
+            Sequence b = a.subSequence(x,y)) {
+            itrbase(str,a);
+            itrbase(str.substring(x,y),b);
+        }
     }
     
     private static void itrbasic(String s,final Sequence a) {
@@ -244,7 +247,9 @@ final class TestUtils {
             assertEquals(a,i.getParent());
             long si = 0L;
             while(i.hasNext()) {
-                streq(s.substring(0,(int)si),i.subSequence());
+                try(Sequence is = i.subSequence()) {
+                    streq(s.substring(0,(int)si),is);
+                }
                 assertEquals(si,i.index());
                 assertEquals(si,i.offset());
                 assertEquals(s.charAt((int)si),i.peek());
@@ -258,7 +263,9 @@ final class TestUtils {
             assertEquals(a,i.getParent());
             long si = s.length();
             while(i.hasNext()) {
-                streq(s.substring((int)si),i.subSequence());
+                try(Sequence is = i.subSequence()) {
+                    streq(s.substring((int)si),is);
+                }
                 assertEquals(--si,i.index());
                 assertEquals(s.length() - si - 1L,i.offset());
                 assertEquals(s.charAt((int)si),i.peek());
@@ -335,30 +342,58 @@ final class TestUtils {
         try(SequenceIterator f = a.forwardIterator();
             SequenceIterator r = a.reverseIterator()) {
             f.jumpTo(1).mark().jumpTo(5);
-            streq(s.substring(1,5),f.subSequence());
+            try(Sequence fs = f.subSequence()) {
+                streq(s.substring(1,5),fs);
+            }
             
             r.jumpTo(4).mark().jumpTo(0);
-            streq(s.substring(1,5),r.subSequence());
+            try(Sequence rs = r.subSequence()) {
+                streq(s.substring(1,5),rs);
+            }
             
             f.jumpTo(1).mark();
-            streq("",f.subSequence());
+            try(Sequence fs = f.subSequence()) {
+                streq("",fs);
+            }
             
             r.jumpTo(1).mark();
-            streq("",r.subSequence());
+            try(Sequence rs = r.subSequence()) {
+                streq("",rs);
+            }
         }
         try(SequenceIterator f = a.forwardIterator();
             SequenceIterator r = a.reverseIterator()) {
             f.jumpTo(1L).mark().jumpTo(5L);
-            streq(s.substring(1,5),f.subSequence());
+            try(Sequence fs = f.subSequence()) {
+                streq(s.substring(1,5),fs);
+            }
             
             r.jumpTo(4L).mark().jumpTo(0L);
-            streq(s.substring(1,5),r.subSequence());
+            try(Sequence rs = r.subSequence()) {
+                streq(s.substring(1,5),rs);
+            }
             
             f.jumpTo(1L).mark();
-            streq("",f.subSequence());
+            try(Sequence fs = f.subSequence()) {
+                streq("",fs);
+            }
             
             r.jumpTo(1L).mark();
-            streq("",r.subSequence());
+            try(Sequence rs = r.subSequence()) {
+                streq("",rs);
+            }
+        }
+    }
+    private static void itrfind(String s,Sequence a) {
+        final int i = s.length() / 2;
+        final char c = s.charAt(i);
+        try(SequenceIterator f = a.forwardIterator();
+            SequenceIterator r = a.reverseIterator()) {
+            assertTrue(f.find(c));
+            assertTrue(r.find(c));
+            
+            assertFalse(f.find(i + 3,c));
+            assertFalse(r.find(i - 3,c));
         }
     }
     private static void itrskip(String s,Sequence a) {
@@ -381,28 +416,16 @@ final class TestUtils {
             
             {
                 final char c = s.substring(1).stripLeading().charAt(0);
-                assertEquals(
-                    c,
-                    f.peekNextNonWS()
-                );
-                assertEquals(
-                    c,
-                    f.nextNonWS()
-                );
+                assertEquals(c,f.peekNextNonWS());
+                assertEquals(c,f.nextNonWS());
                 f.jumpTo(0);
             }
             
             {
                 final String s2 = s.substring(0,s.length() - 1).stripTrailing();
                 final char c = s2.charAt(s2.length() - 1);
-                assertEquals(
-                    c,
-                    r.peekNextNonWS()
-                );
-                assertEquals(
-                    c,
-                    r.nextNonWS()
-                );
+                assertEquals(c,r.peekNextNonWS());
+                assertEquals(c,r.nextNonWS());
                 r.jumpTo(-1);
             }
         }
@@ -501,7 +524,6 @@ final class TestUtils {
             assertNull(r.skipWS(3L));
             r.jumpTo(-1);
             
-            
             assertNull(f.peekNextNonWS());
             assertNull(f.nextNonWS());
             f.jumpTo(0);
@@ -530,62 +552,74 @@ final class TestUtils {
     
     public static String getItr1() {return getTestBuilderString();}
     public static void itr1(final provider p,final appender DATA) {
-        final Sequence a = DATA.append(p.provide()).build();
-        final String test = getItr1(),unwrapped = test.substring(1,test.length() - 1);
-        itrbasic(test,a);
-        itrbasic(unwrapped,a.subSequence(1,-1));
-        
-        itrJump(test.length(),a);
-        itrJump(test.length() - 2,a.subSequence(1,-1));
-        
-        itrPeekOffset(test,a);
-        itrPeekOffset(unwrapped,a.subSequence(1,-1));
-        
-        itrmark(test,a);
-        itrmark(unwrapped,a.subSequence(1,-1));
+        try(Sequence a = DATA.append(p.provide()).build();
+            Sequence b = a.subSequence(1,-1)) {
+            final String test = getItr1(),
+                    unwrapped = test.substring(1,test.length() - 1);
+            itrbasic(test,a);
+            itrbasic(unwrapped,b);
+            
+            itrJump(test.length(),a);
+            itrJump(test.length() - 2,b);
+            
+            itrPeekOffset(test,a);
+            itrPeekOffset(unwrapped,b);
+            
+            itrmark(test,a);
+            itrmark(unwrapped,b);
+            
+            itrfind(test,a);
+            itrfind(unwrapped,b);
+        }
     }
     public static String getItr2() {return "x abc \t\n x";}
     public static void itr2(final provider p,final appender DATA) {
-        final Sequence a = DATA.append(p.provide()).build();
-        final String test = getItr2(),unwrapped = test.substring(1,test.length() - 1);
-        itrskip(test,a);
-        itrskip(unwrapped,a.subSequence(1,-1));
-        
-        itrskiplim(test,a);
-        itrskiplim(unwrapped,a.subSequence(1,-1));
+        try(Sequence a = DATA.append(p.provide()).build();
+            Sequence b = a.subSequence(1,-1)) {
+            final String test = getItr2(),
+                    unwrapped = test.substring(1,test.length() - 1);
+            itrskip(test,a);
+            itrskip(unwrapped,b);
+            
+            itrskiplim(test,a);
+            itrskiplim(unwrapped,b);
+        }
     }
     public static String getItr3() {return "   ";}
     public static void itr3(final provider p,final appender DATA) {
-        final Sequence a = DATA.append(p.provide()).build();
-        itrskipnull(a);
-        itrskipnull(a.subSequence(1,-1));
+        try(Sequence a = DATA.append(p.provide()).build()) {
+            itrskipnull(a);
+            try(Sequence b = a.subSequence(1,-1)) {
+                itrskipnull(b);
+            }
+        }
     }
     
     public static String getMutableSubSequenceString() {return getTestBuilderString();}
     public static void mutableSubSequence(final provider p,final appender DATA) {
-        final MutableSequence ms = (MutableSequence)DATA.append(p.provide()).build();
-        {
+        try(MutableSequence ms = (MutableSequence)DATA.append(p.provide()).build()) {
+            {
+                final int a = ms.length();
+                ms.subSequence(1,-1).close();
+                assertEquals(a,ms.length());
+            }
+            final int x = (ms.length() / 2) - 1;
+            ms.set(x,'*');
             final int a = ms.length();
-            ms.subSequence(1,-1);
-            assertEquals(a,ms.length());
+            try(Sequence ms1 = ms.mutableSubSequence(1,-1)) {
+                assertEquals(a - 2,ms1.length());
+                final String s;
+                {
+                    final String t = getMutableSubSequenceString();
+                    s = t.substring(1,t.length() - 1);
+                }
+                for(int i = 0;i < x - 1;++i)
+                    assertEquals(s.charAt(i),ms1.charAt(i));
+                assertEquals('*',ms1.charAt(x - 1));
+                for(int i = x;i < s.length();++i)
+                    assertEquals(s.charAt(i),ms1.charAt(i));
+            }
         }
-        final int x = (ms.length() / 2) - 1;
-        ms.set(x,'*');
-        {
-            final int a = ms.length();
-            ms.mutableSubSequence(1,-1);
-            assertEquals(a - 2,ms.length());
-        }
-        final String s;
-        {
-            final String t = getMutableSubSequenceString();
-            s = t.substring(1,t.length() - 1);
-        }
-        for(int i = 0;i < x - 1;++i)
-            assertEquals(s.charAt(i),ms.charAt(i));
-        assertEquals('*',ms.charAt(x - 1));
-        for(int i = x;i < s.length();++i)
-            assertEquals(s.charAt(i),ms.charAt(i));
     }
     
     public static String getSetChrString() {return getTestBuilderString();}
@@ -601,11 +635,12 @@ final class TestUtils {
             assertEquals(s.charAt(i),ms.charAt(i));
     }
     public static void setChr(final provider p,final appender DATA) {
-        final MutableSequence ms = (MutableSequence)DATA.append(p.provide()).build();
-        final MutableSequence ms1 = ms.mutableCopy().subSequence(1,-1);
-        final String s = getSetChrString();
-        schr(s,ms);
-        schr(s.substring(1,s.length() - 1),ms1);
+        try(MutableSequence ms = (MutableSequence)DATA.append(p.provide()).build();
+            MutableSequence ms1 = ms.copySubSequence(1,-1)) {
+            final String s = getSetChrString();
+            schr(s,ms);
+            schr(s.substring(1,s.length() - 1),ms1);
+        }
     }
     
     public static String getSetArrString() {return getTestBuilderString();}
@@ -625,12 +660,13 @@ final class TestUtils {
             assertEquals(s.charAt(i),ms.charAt(i));
     }
     public static void setArr(final provider p,final appender DATA) {
-        final MutableSequence ms = (MutableSequence)DATA.append(p.provide()).build();
-        final char[] arr = getMArr();
-        final MutableSequence ms1 = ms.mutableCopy().subSequence(1,-1);
-        final String s = getSetArrString();
-        sarr(arr,s,ms);
-        sarr(arr,s.substring(1,s.length() - 1),ms1);
+        try(MutableSequence ms = (MutableSequence)DATA.append(p.provide()).build();
+            MutableSequence ms1 = ms.copySubSequence(1,-1)) {
+            final char[] arr = getMArr();
+            final String s = getSetArrString();
+            sarr(arr,s,ms);
+            sarr(arr,s.substring(1,s.length() - 1),ms1);
+        }
     }
     
     public static String getSetCSString() {return getTestBuilderString();}
@@ -649,37 +685,61 @@ final class TestUtils {
             assertEquals(s.charAt(i),ms.charAt(i),ms.toString());
     }
     private static void setS2(final CharSequence cs,final String s,final MutableSequence ms) {
-        final MutableSequence ms1 = ms.mutableCopy().subSequence(1,-1);
-        setS(cs,s,ms);
-        setS(cs.subSequence(0,cs.length() - 1),s.substring(1,s.length() - 1),ms1);
+        try(MutableSequence ms1 = ms.mutableCopy()) {
+            setS(cs,s,ms1);
+        }
+        try(MutableSequence ms1 = ms.copySubSequence(1,-1)) {
+            final String str = s.substring(1,s.length() - 1);
+            if(cs instanceof Sequence) {
+                try(Sequence scs = ((Sequence)cs).subSequence(0,-1)) {
+                    setS(scs,str,ms1);
+                }
+            } else
+                setS(cs.subSequence(0,cs.length() - 1),str,ms1);
+        }
     }
     public static void setCS(final provider p,final appender DATA) {
-        final MutableSequence ms = (MutableSequence)DATA.append(p.provide()).build();
-        final String s = getSetCSString();
-        setS2("***",s,ms.mutableCopy());
-        setS2(new ArraySequenceBuilder().data('*','*','*').build(),s,ms.mutableCopy());
-        try {
-            final File out = Files.createTempFile(null,null).toFile();
-            out.deleteOnExit();
-            try(BufferedWriter w = new BufferedWriter(new FileWriter(out,StandardCharsets.UTF_8))) {
-                w.write("***");
+        try(MutableSequence ms = (MutableSequence)DATA.append(p.provide()).build()) {
+            final String s = getSetCSString();
+            try(MutableSequence ms1 = ms.mutableCopy()) {setS2("***",s,ms1);}
+            try(MutableSequence ms1 = ms.mutableCopy()) {
+                setS2(new ArraySequenceBuilder().data('*','*','*').build(),s,ms1);
             }
-            setS2(new FileSequenceBuilder().data(out).build(),s,ms.mutableCopy());
-        } catch(final IOException e) {throw new UncheckedIOException(e);}
-        setS2(
-            new CompoundSequenceBuilder().data(
-                new ArraySequenceBuilder().data('*','*').build(),
-                new ArraySequenceBuilder().data('*').build()
-            ).build(),
-            s,
-            ms
-        );
+            
+            final File out;
+            try {out = Files.createTempFile(null,null).toFile();}
+            catch(final IOException e) {throw new UncheckedIOException(e);}
+            out.deleteOnExit();
+            try {
+                try(
+                    BufferedWriter w = new BufferedWriter(
+                        new FileWriter(out,StandardCharsets.UTF_8)
+                    )
+                ) {w.write("***");}
+                
+                try(MutableSequence ms1 = ms.mutableCopy();
+                    Sequence fs = new FileSequenceBuilder().data(out).build()) {
+                    setS2(fs,s,ms1);
+                }
+            } catch(final IOException e) {throw new UncheckedIOException(e);}
+            finally {out.delete();}
+            
+            setS2(
+                new CompoundSequenceBuilder().data(
+                    new ArraySequenceBuilder().data('*','*').build(),
+                    new ArraySequenceBuilder().data('*').build()
+                ).build(),
+                s,
+                ms
+            );
+        }
     }
     
     public static String getMItrString() {return getTestBuilderString();}
     private static void mitr(final String s,final MutableSequence ms) {
         final int a = 0,b = ms.length() / 2,c = ms.length() - 1;
-        try(final MutableSequenceIterator f = ms.mutableCopy().forwardIterator()) {
+        try(MutableSequence ms1 = ms.mutableCopy();
+            MutableSequenceIterator f = ms1.forwardIterator()) {
             int i = 0;
             while(f.hasNext()) {
                 if(i == a || i == b || i == c) {
@@ -694,7 +754,8 @@ final class TestUtils {
             assertEquals('*',p.charAt(b));
             assertEquals('*',p.charAt(c));
         }
-        try(final MutableSequenceIterator r = ms.mutableCopy().reverseIterator()) {
+        try(MutableSequence ms1 = ms.mutableCopy();
+            MutableSequenceIterator r = ms1.reverseIterator()) {
             int i = ms.length() - 1;
             while(r.hasNext()) {
                 if(i == a || i == b || i == c) {
@@ -709,22 +770,27 @@ final class TestUtils {
             assertEquals('*',p.charAt(b));
             assertEquals('*',p.charAt(c));
         }
-        try(final MutableSequenceIterator f = ms.mutableCopy().forwardIterator()) {
+        try(MutableSequence ms1 = ms.mutableCopy();
+            MutableSequenceIterator f = ms1.forwardIterator()) {
             final MutableSequence p = f.jumpOffset(1).set(-1L,'*').set(1,'^').getParent();
             assertEquals('*',p.charAt(0));
             assertEquals('^',p.charAt(2));
         }
-        try(final MutableSequenceIterator r = ms.reverseIterator()) {
+        try(MutableSequenceIterator r = ms.reverseIterator()) {
             final MutableSequence p = r.jumpOffset(1).set(-1L,'*').set(1,'^').getParent();
             assertEquals('*',p.charAt(-1));
             assertEquals('^',p.charAt(-3));
         }
     }
     public static void mutableIterator(final provider p,final appender DATA) {
-        final MutableSequence ms = (MutableSequence)DATA.append(p.provide()).build();
-        final String s = getMItrString();
-        mitr(s,ms.mutableCopy());
-        mitr(s.substring(1,s.length() - 1),ms.mutableSubSequence(1,-1));
+        try(MutableSequence ms = (MutableSequence)DATA.append(p.provide()).build();
+            MutableSequence ms1 = ms.mutableCopy()) {
+            final String s = getMItrString();
+            mitr(s,ms1);
+            try(MutableSequence ms2 = ms.mutableSubSequence(1,-1)) {
+                mitr(s.substring(1,s.length() - 1),ms2);
+            }
+        }
     }
 }
 

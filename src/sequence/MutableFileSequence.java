@@ -7,6 +7,7 @@ import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.UncheckedIOException;
+import util.FileUtils;
 import util.FixedSizeCharset;
 
 /**
@@ -203,8 +204,38 @@ class MutableFileSequence extends FileSequence implements MutableSequence {
             );
         return start != end? start != this.start || end != this.end
                 ? new MutableFileSequence(file,start,end,end - start,suffix)
-                : this
+                : shallowCopy()
                 : EMPTY;
+    }
+    @Override
+    public MutableSequence copySubSequence(final int start,final int end)
+                                           throws IndexOutOfBoundsException,
+                                                  UncheckedIOException {
+        return copySubSequence((long)start,(long)end);
+    }
+    private final File cpy(final long start,final long length) throws UncheckedIOException {
+        final File nf = tmpFile(Mutability.MUTABLE);
+        // Mutable file sequence already in fixed-2 form, don't need to re-encode.
+        try {FileUtils.transferDirect(file,start,nf,0L,length);}
+        catch(IOException|SecurityException|IllegalArgumentException e) {
+            try {nf.delete();}
+            catch(final SecurityException e1) {}
+            throw ioe(e);
+        }
+        return nf;
+    }
+    @Override
+    public MutableSequence copySubSequence(long start,long end)
+                                           throws IndexOutOfBoundsException,
+                                                  UncheckedIOException {
+        if((end = ssidx(end)) < (start = ssidx(start)))
+            throw new IndexOutOfBoundsException(
+                "Range [%d,%d) is invalid."
+                .formatted(end / M_SCALAR,start / M_SCALAR)
+            );
+        if(start == end) return EMPTY;
+        final long l = end - start;
+        return new MutableFileSequence(cpy(start,l),0,l,l,suffix);
     }
     @Override
     public MutableSequence mutableSubSequence(final int start,final int end)
@@ -221,7 +252,11 @@ class MutableFileSequence extends FileSequence implements MutableSequence {
                 "Invalid range: [%d,%d)"
                 .formatted(end / M_SCALAR,start / M_SCALAR)
             );
-        return (length = (this.end = end) - (this.start = start)) == 0L? EMPTY : this;
+        if((length = (this.end = end) - (this.start = start)) == 0L) {
+            close();
+            return EMPTY;
+        }
+        return this;
     }
     
     /**Mutable File Sequence Iterator*/
@@ -277,7 +312,7 @@ class MutableFileSequence extends FileSequence implements MutableSequence {
                 );
             return a != b? a != sooper.start || b != sooper.end
                     ? new MutableFileSequence(sooper.file,a,b,b-a,sooper.suffix)
-                    : (MutableSequence)sooper.parent
+                    : (MutableSequence)sooper.parent.shallowCopy()
                     : EMPTY;
         }
     }
@@ -312,16 +347,7 @@ class MutableFileSequence extends FileSequence implements MutableSequence {
     }
     @Override
     public MutableSequence mutableCopy() throws UncheckedIOException {
-        final File nf = tmpFile(Mutability.MUTABLE);
-        // Mutable file sequence already in fixed-2 form, don't need to re-encode.
-        try(final BufferedInputStream I = new BufferedInputStream(new FileInputStream(file));
-            final BufferedOutputStream O = new BufferedOutputStream(new FileOutputStream(nf))) {
-            I.transferTo(O);
-            return new MutableFileSequence(nf,start,end,length,suffix);
-        } catch(UncheckedIOException|IOException|SecurityException e) {
-            nf.delete();
-            throw ioe(e);
-        }
+        return new MutableFileSequence(cpy(start,length),0,length,length,suffix);
     }
     @Override
     public Sequence immutableCopy() throws UncheckedIOException {

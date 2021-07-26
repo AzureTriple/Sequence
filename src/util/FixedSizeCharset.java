@@ -1,26 +1,20 @@
 package util;
 
+import static util.FileUtils.bisr;
+import static util.FileUtils.transferCoded;
+import static util.FileUtils.transferDirect;
+import static util.FileUtils.writeAndTruncate;
+import static util.FileUtils.writeAndTruncateCoded;
+
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 
-import java.io.BufferedInputStream;
-import java.io.BufferedOutputStream;
 import java.io.BufferedReader;
-import java.io.BufferedWriter;
 import java.io.File;
-import java.io.FileInputStream;
-import java.io.FileNotFoundException;
-import java.io.FileOutputStream;
 import java.io.IOException;
-import java.io.InputStream;
-import java.io.InputStreamReader;
-import java.io.OutputStream;
-import java.io.OutputStreamWriter;
 import java.io.RandomAccessFile;
-import java.io.Reader;
-import java.io.Writer;
 import java.nio.ByteBuffer;
 import java.nio.CharBuffer;
 import java.nio.charset.Charset;
@@ -392,63 +386,6 @@ public final class FixedSizeCharset extends Charset {
         };
     }
     
-    private static BufferedReader br(final Reader r) {return new BufferedReader(r);}
-    private static BufferedWriter bw(final Writer w) {return new BufferedWriter(w);}
-    private static BufferedReader bisr(final FileInputStream f,final CharsetDecoder d) {
-        return br(new InputStreamReader(f,d));
-    }
-    private static BufferedReader bisr(final File f,final CharsetDecoder d) throws FileNotFoundException {
-        return bisr(new FileInputStream(f),d);
-    }
-    private static BufferedWriter bosw(final FileOutputStream f,final CharsetEncoder e) {
-        return bw(new OutputStreamWriter(f,e));
-    }
-    private static BufferedWriter bosw(final File f,final CharsetEncoder e) throws FileNotFoundException {
-        return bosw(new FileOutputStream(f),e);
-    }
-    private static BufferedInputStream bis(final InputStream i) {
-        return new BufferedInputStream(i);
-    }
-    private static BufferedInputStream bis(final File f) throws FileNotFoundException {
-        return bis(new FileInputStream(f));
-    }
-    private static BufferedOutputStream bos(final OutputStream o) {
-        return new BufferedOutputStream(o);
-    }
-    private static BufferedOutputStream bos(final File f) throws FileNotFoundException {
-        return bos(new FileOutputStream(f));
-    }
-    private static void writeAndTruncateF(final File f,final CharsetDecoder d,
-                                          final File t,final CharsetEncoder e)
-                                          throws IOException {
-        try(final FileInputStream fis = new FileInputStream(t);
-            final BufferedReader I = bisr(fis,d);
-            final BufferedWriter O = bosw(t,e)) {
-            fis.getChannel().truncate(I.transferTo(O));
-        }
-    }
-    private static void writeAndTruncate(final File f,final File t) throws IOException {
-        try(final FileOutputStream fos = new FileOutputStream(t);
-            final BufferedInputStream I = bis(f);
-            final BufferedOutputStream O = bos(fos)) {
-            fos.getChannel().truncate(I.transferTo(O));
-        }
-    }
-    private static void transferCoded(final File f,final CharsetDecoder d,
-                                      final File t,final CharsetEncoder e)
-                                      throws IOException {
-        try(final BufferedReader I = bisr(f,d);
-            final BufferedWriter O = bosw(t,e)) {
-            I.transferTo(O);
-        }
-    }
-    private static void transferDirect(final File f,final File t) throws IOException {
-        try(final BufferedInputStream I = bis(f);
-            final BufferedOutputStream O = bos(t)) {
-            I.transferTo(O);
-        }
-    }
-    
     private static void resize(final File f,
                                final D d,final int ds,
                                final E e,final int es)
@@ -463,7 +400,7 @@ public final class FixedSizeCharset extends Charset {
         // desired format.
         try {
             if(ds > es) {
-                writeAndTruncateF(f,d,tmp,e);
+                writeAndTruncateCoded(f,d,tmp,e);
                 transferDirect(tmp,f);
             } else {
                 transferDirect(f,tmp);
@@ -649,7 +586,7 @@ public final class FixedSizeCharset extends Charset {
         if(size == 0) return "";
         final char[] chr = new char[size];
         final int nchr;
-        try(final BufferedReader I = bisr(f,(D)newDecoder())) {nchr = I.read(chr);}
+        try(BufferedReader I = bisr(f,(D)newDecoder())) {nchr = I.read(chr);}
         return String.valueOf(chr,0,nchr);
     }
     /**

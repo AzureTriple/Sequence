@@ -94,14 +94,18 @@ class MutableCompoundSequence extends CompoundSequence implements MutableSequenc
                 ((MutableSequence)this.data[segment]).set(relative,data);
                 return;
             }
-            ((MutableSequence)this.data[segment]).set(relative,data.subSequence(0L,o));
+            try(Sequence ss = data.subSequence(0L,o)) {
+                ((MutableSequence)this.data[segment]).set(relative,ss);
+            }
             l -= o;
         }
         do {
             final long dl = min(l,this.data[++segment].size());
-            ((MutableSequence)this.data[segment]).set(0,data.subSequence(o,o += dl));
+            try(Sequence ss = data.subSequence(o,o += dl)) {
+                ((MutableSequence)this.data[segment]).set(0,ss);
+            }
             l -= dl;
-        } while(l != 0);
+        } while(l != 0L);
     }
     @Override
     public MutableSequence set(long offset,final CharSequence data)
@@ -147,6 +151,43 @@ class MutableCompoundSequence extends CompoundSequence implements MutableSequenc
         return (MutableSequence)super.subSequence(start,end);
     }
     @Override
+    public MutableSequence copySubSequence(final int start,final int end)
+                                           throws IndexOutOfBoundsException,
+                                                  UncheckedIOException {
+        return copySubSequence((long)start,(long)end);
+    }
+    @Override
+    public MutableSequence copySubSequence(long start,long end)
+                                           throws IndexOutOfBoundsException,
+                                                  UncheckedIOException {
+        if((end = ssidx(end)) < (start = ssidx(start)))
+            throw new IndexOutOfBoundsException(
+                "Range [%d,%d) is invalid."
+                .formatted(start,end)
+            );
+        if(start == end) return EMPTY;
+        final int first = segment(start,subSizes),last = segment(end - 1,subSizes);
+        final long r0 = relative(start,first,subSizes),r1 = relative(end,last,subSizes);
+        if(first == last) return ((MutableSequence)data[first]).copySubSequence(r0,r1);
+        
+        final Sequence[] ndata = new Sequence[last - first + 1];
+        {
+            ndata[0] = ((MutableSequence)data[first]).copySubSequence(r0,data[first].size());
+            int i = 1;
+            try {
+                for(int s = first;++s != last;++i)
+                    ndata[i] = ((MutableSequence)data[s]).mutableCopy();
+                ndata[i] = ((MutableSequence)data[last]).copySubSequence(0L,r1);
+            } catch(final UncheckedIOException e) {
+                closeIgnore(ndata,0,i);
+                throw e;
+            }
+        }
+        final long[] nss = nss(ndata,data[last].size(),subSizes,first,r0,r1);
+        return closeIsShared? new MutableCompoundSequence(nss,ndata)
+                            : new MutableCompoundSequence(nss,ndata,false);
+    }
+    @Override
     public MutableSequence mutableSubSequence(final int start,final int end)
                                               throws IndexOutOfBoundsException,
                                                      UncheckedIOException {
@@ -165,15 +206,14 @@ class MutableCompoundSequence extends CompoundSequence implements MutableSequenc
         final int first = segment(start,subSizes),last = segment(end - 1,subSizes);
         final long r0 = relative(start,first,subSizes),r1 = relative(end,last,subSizes);
         if(first == last) {
-            final MutableSequence out = ((MutableSequence)data[first]).mutableSubSequence(r0,r1)
-                                                                      .mutableCopy();
+            final MutableSequence out = ((MutableSequence)data[first]).mutableSubSequence(r0,r1);
             try {close();}
             catch(final UncheckedIOException e) {closeIgnore(out); throw e;}
             return out;
         }
         final long ls = data[last].size();
         
-        data = ndata(data,first,last,r0,r1,closeIsShared);
+        csc.data = data = ndata(data,first,last,r0,r1,closeIsShared);
         if(closeIsShared) {
             closeIsShared = false;
             for(final Sequence s : data) {

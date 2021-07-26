@@ -205,6 +205,11 @@ class ArraySequence implements Sequence {
         @NoIO @Override public Character nextNonWS(final int limit) {return iNNWS(skipidx(limit));}
         @NoIO @Override public Character nextNonWS(final long limit) {return iNNWS(skipidx(limit));}
         
+        @NoIO abstract boolean iFind(final int limit,final char c);
+        @NoIO @Override public boolean find(final char c) {return iFind(lastIdx,c);}
+        @NoIO @Override public boolean find(final int limit,final char c) {return iFind(skipidx(limit),c);}
+        @NoIO @Override public boolean find(final long limit,final char c) {return iFind(skipidx(limit),c);}
+        
         @Override public SequenceIterator mark() throws IndexOutOfBoundsException {return mark(0);}
         @Override public abstract SequenceIterator mark(int offset) throws IndexOutOfBoundsException;
         @Override public SequenceIterator mark(final long offset) throws IndexOutOfBoundsException {return mark((int)offset);}
@@ -303,6 +308,14 @@ class ArraySequence implements Sequence {
                         return data[cursor];
             return null;
         }
+        @NoIO @Override
+        boolean iFind(final int limit,final char c) {
+            if(cursor < limit) {
+                do if(data[cursor++] == c) return true;
+                while(cursor != limit);
+            }
+            return false;
+        }
         
         @Override
         public SequenceIterator mark(final int offset) throws IndexOutOfBoundsException {
@@ -367,6 +380,14 @@ class ArraySequence implements Sequence {
                     if(!isWhitespace(data[cursor]))
                         return data[cursor];
             return null;
+        }
+        @NoIO @Override
+        boolean iFind(final int limit,final char c) {
+            if(cursor > limit) {
+                do if(data[cursor--] == c) return true;
+                while(cursor != limit);
+            }
+            return false;
         }
         
         @Override

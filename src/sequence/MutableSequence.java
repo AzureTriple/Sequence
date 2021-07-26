@@ -72,14 +72,33 @@ public interface MutableSequence extends Sequence {
     @Override
     MutableSequence subSequence(long start,long end) throws IndexOutOfBoundsException,
                                                             UncheckedIOException;
-    
     /**
-     * Resizes this sequence to the specified bounds.
+     * A convenience method for copying a region.
+     * 
+     * @see #subSequence(int,int)
+     * @see #mutableCopy()
+     */
+    MutableSequence copySubSequence(int start,int end) throws IndexOutOfBoundsException,
+                                                              UncheckedIOException;
+    /**
+     * A convenience method for copying a region.
+     * 
+     * @see #subSequence(long,long)
+     * @see #mutableCopy()
+     */
+    MutableSequence copySubSequence(long start,long end) throws IndexOutOfBoundsException,
+                                                                UncheckedIOException;
+    /**
+     * Creates a resized view of this sequence within the specified bounds. Note
+     * that using this method only avoids constructing a new sequence when possible.
+     * Continuing to use this sequence after calling this method yields undefined
+     * results, especially if an {@linkplain UncheckedIOException} is thrown.
      * 
      * @param start The starting index, inclusive.
      * @param end   The ending index, exclusive.
      * 
-     * @return <code>this</code>
+     * @return A view of the characters between the bounds, which may or may not be
+     *         <code>this</code>.
      * 
      * @throws IndexOutOfBoundsException <code>start</code> or <code>end</code> are
      *                                   out of bounds, or the shifted value of
@@ -89,12 +108,16 @@ public interface MutableSequence extends Sequence {
     MutableSequence mutableSubSequence(int start,int end) throws IndexOutOfBoundsException,
                                                                  UncheckedIOException;
     /**
-     * Resizes this sequence to the specified bounds.
+     * Creates a resized view of this sequence within the specified bounds. Note
+     * that using this method only avoids constructing a new sequence when possible.
+     * Continuing to use this sequence after calling this method yields undefined
+     * results, especially if an {@linkplain UncheckedIOException} is thrown.
      * 
      * @param start The starting index, inclusive.
      * @param end   The ending index, exclusive.
      * 
-     * @return <code>this</code>
+     * @return A view of the characters between the bounds, which may or may not be
+     *         <code>this</code>.
      * 
      * @throws IndexOutOfBoundsException <code>start</code> or <code>end</code> are
      *                                   out of bounds, or the shifted value of

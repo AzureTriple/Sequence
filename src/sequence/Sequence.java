@@ -187,6 +187,32 @@ public interface Sequence extends CharSequence,
         Character nextNonWS(long limit) throws UncheckedIOException;
         
         /**
+         * Advances past the next instance of the input character.
+         * 
+         * @return <code>true</code> iff the character is found before the end of the
+         *         sequence.
+         */
+        boolean find(char c) throws UncheckedIOException;
+        /**
+         * Advances past the next instance of the input character.
+         * 
+         * @param limit Index of the last character to consider, exclusive.
+         *              Out-of-bounds indices are clipped.
+         * 
+         * @return <code>true</code> iff the character is found before the index.
+         */
+        boolean find(int limit,char c) throws UncheckedIOException;
+        /**
+         * Advances past the next instance of the input character.
+         * 
+         * @param limit Index of the last character to consider, exclusive.
+         *              Out-of-bounds indices are clipped.
+         * 
+         * @return <code>true</code> iff the character is found before the index.
+         */
+        boolean find(long limit,char c) throws UncheckedIOException;
+        
+        /**
          * Saves the current position.
          * 
          * @return <code>this</code>
@@ -336,9 +362,9 @@ public interface Sequence extends CharSequence,
     default int compareTo(final CharSequence o) {
         if(o == null) return 1;
         final long oSize;
-        try(final SimpleSequenceIterator a = iterator()) {
+        try(SimpleSequenceIterator a = iterator()) {
             if(o instanceof Sequence) {
-                try(final SimpleSequenceIterator b = ((Sequence)o).iterator()) {
+                try(SimpleSequenceIterator b = ((Sequence)o).iterator()) {
                     while(a.hasNext() && b.hasNext()) {
                         final int diff = Character.compare(a.next(),b.next());
                         if(diff != 0) return diff;
@@ -467,6 +493,20 @@ public interface Sequence extends CharSequence,
             ssoob(start); ssoob(end);
             return this;
         }
+        @Override
+        public MutableSequence copySubSequence(final int start,final int end)
+                                               throws IndexOutOfBoundsException,
+                                                      UncheckedIOException {
+            ssoob(start); ssoob(end);
+            return this;
+        }
+        @Override
+        public MutableSequence copySubSequence(final long start,final long end)
+                                               throws IndexOutOfBoundsException,
+                                                      UncheckedIOException {
+            ssoob(start); ssoob(end);
+            return this;
+        }
         @NoIO @Override
         public MutableSequence mutableSubSequence(final int start,final int end)
                                                   throws IndexOutOfBoundsException {
@@ -543,6 +583,10 @@ public interface Sequence extends CharSequence,
             @NoIO @Override public Character nextNonWS() {return null;}
             @NoIO @Override public Character nextNonWS(final int limit) {return null;}
             @NoIO @Override public Character nextNonWS(final long limit) {return null;}
+            
+            @NoIO @Override public boolean find(char c) {return false;}
+            @NoIO @Override public boolean find(int limit,char c) {return false;}
+            @NoIO @Override public boolean find(long limit,char c) {return false;}
             
             @Override public MutableSequenceIterator mark() {return this;}
             @Override
